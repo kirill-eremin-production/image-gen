@@ -47,7 +47,6 @@ export function addUnlocked(req: NextRequest, res: NextResponse, projectId: stri
   const set = readUnlocked(req);
   set.add(projectId);
   res.cookies.set(UNLOCKED_COOKIE, [...set].join(","), {
-    httpOnly: true,
     sameSite: "lax",
     path: "/",
     maxAge: COOKIE_MAX_AGE,
@@ -58,7 +57,6 @@ export function removeUnlocked(req: NextRequest, res: NextResponse, projectId: s
   const set = readUnlocked(req);
   if (!set.delete(projectId)) return;
   res.cookies.set(UNLOCKED_COOKIE, [...set].join(","), {
-    httpOnly: true,
     sameSite: "lax",
     path: "/",
     maxAge: COOKIE_MAX_AGE,

@@ -20,10 +20,7 @@ export function SettingsDialog({ open, onSaved, onClose, required }: SettingsDia
     if (!open) return;
     setError("");
     setReveal(false);
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((s) => setApiKey(s.openrouterApiKey || ""))
-      .catch(() => setApiKey(""));
+    setApiKey("");
   }, [open]);
 
   if (!open) return null;

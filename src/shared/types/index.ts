@@ -22,6 +22,10 @@ export interface Settings {
   openrouterApiKey: string;
 }
 
+export interface SettingsState {
+  hasOpenrouterApiKey: boolean;
+}
+
 export interface Project {
   id: string;
   name: string;

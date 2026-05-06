@@ -94,51 +94,89 @@ export default function Home() {
     setProjects(await fetchProjects());
   }, []);
 
+  const effectiveActiveProjectId =
+    activeProjectId && projects.some((project) => project.id === activeProjectId)
+      ? activeProjectId
+      : null;
+
+  useEffect(() => {
+    setActiveProjectId(effectiveActiveProjectId);
+  }, [effectiveActiveProjectId]);
+
   // Initial load
   useEffect(() => {
-    fetchSettings().then((s) => {
-      if (!s.openrouterApiKey) setShowSettings(true);
+    let cancelled = false;
+
+    Promise.all([fetchSettings(), fetchProjects()]).then(([settings, projectsData]) => {
+      if (cancelled) return;
+
+      if (!settings.hasOpenrouterApiKey) setShowSettings(true);
+      setProjects(Array.isArray(projectsData) ? projectsData : []);
       setSettingsLoaded(true);
     });
-    loadProjects();
-    loadThreads();
-    loadLibrary();
-  }, [loadThreads, loadLibrary, loadProjects]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!activeProjectId) return;
-    if (!projects.length) return;
-    if (!projects.some((project) => project.id === activeProjectId)) {
-      setActiveProject(null);
-    }
-  }, [activeProjectId, projects]);
+    if (!settingsLoaded) return;
 
-  // Reload data when project changes
-  useEffect(() => {
-    setActiveProjectId(activeProjectId);
-    setCurrentThreadId(null);
-    setSelectedImages(new Set());
-    loadThreads();
-    loadLibrary();
-  }, [activeProjectId, loadThreads, loadLibrary]);
+    let cancelled = false;
+
+    Promise.all([
+      fetchThreads(),
+      fetchFiles("references"),
+      fetchFiles("generated"),
+    ]).then(([threadsData, refs, gens]) => {
+      if (cancelled) return;
+
+      setThreads(Array.isArray(threadsData) ? threadsData : []);
+      setReferences(Array.isArray(refs) ? refs : []);
+      setGenerated(Array.isArray(gens) ? gens : []);
+      setCurrentThreadId(null);
+      setSelectedImages(new Set());
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveActiveProjectId, settingsLoaded]);
 
   const currentThread = threads.find((t) => t.id === currentThreadId) || null;
-  const activeProject = projects.find((p) => p.id === activeProjectId) || null;
+  const activeProject =
+    projects.find((p) => p.id === effectiveActiveProjectId) || null;
 
   // --- Project handlers ---
 
-  function handleSelectProject(id: string | null) {
+  async function handleSelectProject(id: string | null) {
     if (id === activeProjectId) return;
 
     if (id) {
       const project = projects.find((p) => p.id === id);
       if (project?.hasPassword && !unlockedIds.has(id)) {
-        setPasswordProject(project);
+        const touched = await handleTouchIdUnlock(project);
+        if (!touched) setPasswordProject(project);
         return;
       }
     }
 
     setActiveProject(id);
+  }
+
+  async function handleTouchIdUnlock(project: ProjectInfo): Promise<boolean> {
+    if (typeof window === "undefined" || !window.electronAPI?.promptTouchID) return false;
+
+    const result = await window.electronAPI.promptTouchID(
+      `Разрешите доступ к проекту ${project.name}`,
+    );
+
+    if (!result?.ok) return false;
+
+    setUnlockedIds((prev) => new Set(prev).add(project.id));
+    setActiveProject(project.id);
+    return true;
   }
 
   async function handleUnlockProject(password: string) {
@@ -148,7 +186,10 @@ export default function Home() {
       setUnlockedIds((prev) => new Set(prev).add(passwordProject.id));
       setActiveProject(passwordProject.id);
       setPasswordProject(null);
+      return;
     }
+
+    setPasswordProject(passwordProject);
   }
 
   async function handleSaveProject(data: {
@@ -260,7 +301,7 @@ export default function Home() {
         onDeleteThread={handleDeleteThread}
         onClearAll={handleClearAll}
         projects={projects}
-        activeProjectId={activeProjectId}
+        activeProjectId={effectiveActiveProjectId}
         onSelectProject={handleSelectProject}
         onCreateProject={() => {
           setEditingProject(null);

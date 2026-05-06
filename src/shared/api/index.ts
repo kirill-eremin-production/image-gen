@@ -1,4 +1,4 @@
-import { ImageFile, Thread, GenerateParams, ProjectInfo } from "@/shared/types";
+import { ImageFile, Thread, GenerateParams, ProjectInfo, SettingsState } from "@/shared/types";
 
 let _activeProjectId: string | null = null;
 
@@ -68,7 +68,7 @@ export async function generateImage(params: GenerateParams) {
 
 // --- Settings (global) ---
 
-export async function fetchSettings(): Promise<{ openrouterApiKey: string }> {
+export async function fetchSettings(): Promise<SettingsState> {
   const res = await fetch("/api/settings");
   return res.json();
 }

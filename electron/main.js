@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain, systemPreferences } = require("electron");
 const { fork } = require("child_process");
 const path = require("path");
 const net = require("net");
@@ -74,6 +74,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -83,6 +84,26 @@ function createWindow() {
     mainWindow = null;
   });
 }
+
+ipcMain.handle("prompt-touch-id", async (_event, reason) => {
+  if (process.platform !== "darwin") {
+    return { ok: false, error: "Touch ID недоступен на этой платформе" };
+  }
+
+  if (!systemPreferences.canPromptTouchID()) {
+    return { ok: false, error: "Touch ID недоступен на этом устройстве" };
+  }
+
+  try {
+    await systemPreferences.promptTouchID(reason || "Подтвердите доступ");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Проверка биометрии не пройдена",
+    };
+  }
+});
 
 app.on("ready", async () => {
   try {
