@@ -9,7 +9,8 @@
     "start": "next start -p 50911",
     "lint": "eslint",
     "electron:dev": "electron .",
-    "electron:build": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder"
+    "electron:build": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder && npm run electron:install",
+    "electron:install": "node scripts/install-built-app.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.7.0",
