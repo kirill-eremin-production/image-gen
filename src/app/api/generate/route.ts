@@ -11,6 +11,7 @@ import {
   resolveDir,
   getSettings,
 } from "@/shared/lib/data";
+import { checkProjectAccess, denied } from "@/shared/lib/projectContext";
 
 const MODELS: Record<string, string> = {
   "gemini-3-pro": "google/gemini-3-pro-image-preview",
@@ -21,7 +22,10 @@ const DEFAULT_MODEL = "gemini-3.1-flash";
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 export async function POST(req: NextRequest) {
-  const projectId = req.headers.get("x-project-id") || null;
+  const access = checkProjectAccess(req);
+  if (!access.ok) return denied(access);
+
+  const projectId = access.projectId;
   ensureDirs(projectId);
 
   const { prompt, resolution, aspectRatio, references, threadId, model } =
@@ -97,9 +101,10 @@ export async function POST(req: NextRequest) {
       if (img.image_url?.url?.startsWith("data:image")) {
         const filename = saveBase64Image(img.image_url.url, gensDir, "gen");
         if (filename) {
+          const projectQuery = projectId ? `&project=${projectId}` : "";
           savedImages.push({
             name: filename,
-            url: `/api/view?type=generated&name=${filename}`,
+            url: `/api/view?type=generated&name=${filename}${projectQuery}`,
           });
         }
       }

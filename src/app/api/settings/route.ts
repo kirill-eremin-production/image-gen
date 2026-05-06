@@ -4,7 +4,7 @@ import { getSettings, saveSettings } from "@/shared/lib/data";
 export async function GET() {
   const settings = getSettings();
   return NextResponse.json({
-    openrouterApiKey: settings.openrouterApiKey ? "***" : "",
+    openrouterApiKey: settings.openrouterApiKey || "",
   });
 }
 

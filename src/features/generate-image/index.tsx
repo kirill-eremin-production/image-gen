@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { MODELS, RESOLUTIONS, ASPECT_RATIOS } from "@/shared/config";
+import { generateImage } from "@/shared/api";
 
 interface GenerateImageProps {
   selectedImages: Set<string>;
@@ -59,20 +60,14 @@ export function GenerateImage({
     const references = [...uploadedFiles, ...Array.from(selectedImages)];
 
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          model,
-          resolution,
-          aspectRatio,
-          references,
-          threadId: currentThreadId,
-        }),
+      const data = await generateImage({
+        prompt,
+        model,
+        resolution,
+        aspectRatio,
+        references,
+        threadId: currentThreadId,
       });
-
-      const data = await res.json();
 
       if (data.choices?.[0]?.message?.images) {
         const costText =

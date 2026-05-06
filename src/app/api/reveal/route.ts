@@ -3,9 +3,13 @@ import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { ensureDirs, resolveDir } from "@/shared/lib/data";
+import { checkProjectAccess, denied } from "@/shared/lib/projectContext";
 
 export async function GET(req: NextRequest) {
-  const projectId = req.headers.get("x-project-id") || null;
+  const access = checkProjectAccess(req);
+  if (!access.ok) return denied(access);
+
+  const projectId = access.projectId;
   ensureDirs(projectId);
   const type = req.nextUrl.searchParams.get("type") || "generated";
   const name = req.nextUrl.searchParams.get("name");

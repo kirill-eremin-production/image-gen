@@ -1,17 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { KeyRound, Save } from "lucide-react";
+import { useEffect, useState } from "react";
+import { KeyRound, Save, X, Eye, EyeOff } from "lucide-react";
 
 interface SettingsDialogProps {
   open: boolean;
   onSaved: () => void;
+  onClose?: () => void;
+  required?: boolean;
 }
 
-export function SettingsDialog({ open, onSaved }: SettingsDialogProps) {
+export function SettingsDialog({ open, onSaved, onClose, required }: SettingsDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [reveal, setReveal] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setError("");
+    setReveal(false);
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s) => setApiKey(s.openrouterApiKey || ""))
+      .catch(() => setApiKey(""));
+  }, [open]);
 
   if (!open) return null;
 
@@ -43,13 +56,31 @@ export function SettingsDialog({ open, onSaved }: SettingsDialogProps) {
     }
   }
 
+  const canClose = !required && !!onClose;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 w-full max-w-md shadow-2xl border border-zinc-200 dark:border-zinc-700">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={canClose ? onClose : undefined}
+    >
+      <div
+        className="bg-white dark:bg-zinc-900 rounded-xl p-6 w-full max-w-md shadow-2xl border border-zinc-200 dark:border-zinc-700 relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {canClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+            aria-label="Закрыть"
+          >
+            <X size={18} />
+          </button>
+        )}
+
         <div className="flex items-center gap-3 mb-4">
           <KeyRound size={24} className="text-blue-500" />
           <h2 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">
-            Настройка API ключа
+            Настройки приложения
           </h2>
         </div>
 
@@ -65,19 +96,30 @@ export function SettingsDialog({ open, onSaved }: SettingsDialogProps) {
           </a>
         </p>
 
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSave()}
-          placeholder="sk-or-v1-..."
-          className="w-full p-3 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"
-          autoFocus
-        />
+        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1.5">
+          API ключ OpenRouter
+        </label>
+        <div className="relative mb-3">
+          <input
+            type={reveal ? "text" : "password"}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            placeholder="sk-or-v1-..."
+            className="w-full p-3 pr-10 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            autoFocus
+          />
+          <button
+            type="button"
+            onClick={() => setReveal((v) => !v)}
+            className="absolute top-1/2 -translate-y-1/2 right-2 p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+            aria-label={reveal ? "Скрыть ключ" : "Показать ключ"}
+          >
+            {reveal ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
 
-        {error && (
-          <p className="text-sm text-red-500 mb-3">{error}</p>
-        )}
+        {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
 
         <button
           onClick={handleSave}

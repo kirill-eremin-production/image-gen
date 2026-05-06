@@ -13,7 +13,8 @@ function projectHeaders(): HeadersInit {
 // --- Images ---
 
 export function imageUrl(type: string, name: string) {
-  return `/api/view?type=${type}&name=${name}`;
+  const projectQuery = _activeProjectId ? `&project=${_activeProjectId}` : "";
+  return `/api/view?type=${type}&name=${name}${projectQuery}`;
 }
 
 export async function fetchFiles(type: "references" | "generated"): Promise<ImageFile[]> {

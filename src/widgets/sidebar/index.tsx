@@ -16,6 +16,7 @@ interface SidebarProps {
   onCreateProject: () => void;
   onProjectSettings: (project: ProjectInfo) => void;
   onClearAllFiles: () => void;
+  onOpenSettings: () => void;
 }
 
 export function Sidebar({
@@ -31,6 +32,7 @@ export function Sidebar({
   onCreateProject,
   onProjectSettings,
   onClearAllFiles,
+  onOpenSettings,
 }: SidebarProps) {
   const sortedThreads = [...threads].sort((a, b) => {
     const lastA = a.history.length > 0 ? new Date(a.history[a.history.length - 1].timestamp).getTime() : 0;
@@ -149,6 +151,17 @@ export function Sidebar({
         >
           <Trash2 size={12} />
           Удалить все файлы проекта
+        </button>
+      </div>
+
+      {/* App settings */}
+      <div className="p-3 border-t border-zinc-800 shrink-0">
+        <button
+          onClick={onOpenSettings}
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+        >
+          <Settings size={16} />
+          Настройки
         </button>
       </div>
     </aside>

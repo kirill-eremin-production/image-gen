@@ -24,6 +24,27 @@ import { SettingsDialog } from "@/features/settings-dialog";
 import { ProjectDialog } from "@/features/project-dialog";
 import { ProjectPasswordDialog } from "@/features/project-password-dialog";
 
+const ACTIVE_PROJECT_STORAGE_KEY = "image-generator-active-project-id";
+const UNLOCKED_PROJECTS_COOKIE = "unlocked_projects";
+
+function getStoredActiveProjectId(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+}
+
+function getUnlockedProjectsFromCookie(): Set<string> {
+  if (typeof document === "undefined") return new Set();
+
+  const cookie = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${UNLOCKED_PROJECTS_COOKIE}=`));
+
+  if (!cookie) return new Set();
+
+  const raw = decodeURIComponent(cookie.split("=")[1] || "");
+  return new Set(raw.split(",").filter(Boolean));
+}
+
 export default function Home() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
@@ -35,14 +56,29 @@ export default function Home() {
 
   // Projects state
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [activeProjectId, setActiveProject] = useState<string | null>(null);
-  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+  const [activeProjectId, setActiveProject] = useState<string | null>(
+    getStoredActiveProjectId,
+  );
+  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(() =>
+    getUnlockedProjectsFromCookie(),
+  );
   const [showProjectDialog, setShowProjectDialog] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectInfo | null>(null);
   const [passwordProject, setPasswordProject] = useState<ProjectInfo | null>(null);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (activeProjectId) {
+      window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, activeProjectId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+    }
+  }, [activeProjectId]);
+
   const loadThreads = useCallback(async () => {
-    setThreads(await fetchThreads());
+    const data = await fetchThreads();
+    setThreads(Array.isArray(data) ? data : []);
   }, []);
 
   const loadLibrary = useCallback(async () => {
@@ -50,8 +86,8 @@ export default function Home() {
       fetchFiles("references"),
       fetchFiles("generated"),
     ]);
-    setReferences(refs);
-    setGenerated(gens);
+    setReferences(Array.isArray(refs) ? refs : []);
+    setGenerated(Array.isArray(gens) ? gens : []);
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -68,6 +104,14 @@ export default function Home() {
     loadThreads();
     loadLibrary();
   }, [loadThreads, loadLibrary, loadProjects]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    if (!projects.length) return;
+    if (!projects.some((project) => project.id === activeProjectId)) {
+      setActiveProject(null);
+    }
+  }, [activeProjectId, projects]);
 
   // Reload data when project changes
   useEffect(() => {
@@ -180,7 +224,11 @@ export default function Home() {
 
   return (
     <div className="flex h-screen">
-      <SettingsDialog open={showSettings} onSaved={() => setShowSettings(false)} />
+      <SettingsDialog
+        open={showSettings}
+        onSaved={() => setShowSettings(false)}
+        onClose={() => setShowSettings(false)}
+      />
 
       <ProjectDialog
         open={showProjectDialog}
@@ -219,6 +267,7 @@ export default function Home() {
           setShowProjectDialog(true);
         }}
         onProjectSettings={handleProjectSettings}
+        onOpenSettings={() => setShowSettings(true)}
         onClearAllFiles={async () => {
           if (!confirm("Удалить все файлы проекта (чаты, референсы, генерации)? Это действие необратимо.")) return;
           await Promise.all([

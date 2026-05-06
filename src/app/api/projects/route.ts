@@ -6,6 +6,7 @@ import {
   deleteProjectData,
   hashPassword,
 } from "@/shared/lib/data";
+import { addUnlocked } from "@/shared/lib/projectContext";
 import { Project, ProjectInfo } from "@/shared/types";
 
 function toInfo(p: Project): ProjectInfo {
@@ -40,7 +41,9 @@ export async function POST(req: NextRequest) {
   saveProjects(projects);
   ensureDirs(id);
 
-  return NextResponse.json(toInfo(project));
+  const res = NextResponse.json(toInfo(project));
+  if (project.passwordHash) addUnlocked(req, res, project.id);
+  return res;
 }
 
 export async function DELETE(req: NextRequest) {
