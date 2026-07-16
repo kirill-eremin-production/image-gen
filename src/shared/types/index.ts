@@ -51,6 +51,22 @@ export interface ProjectInfo {
   hasPassword: boolean;
 }
 
+export type PromptPresetScope = "global" | "project";
+
+export interface PromptPresetVariant {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+export interface PromptPresetCategory {
+  id: string;
+  name: string;
+  scope: PromptPresetScope;
+  projectId: string | null;
+  variants: PromptPresetVariant[];
+}
+
 export interface GenerateParams {
   mediaType: "image" | "video";
   prompt: string;

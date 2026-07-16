@@ -1,4 +1,12 @@
-import { ImageFile, Thread, GenerateParams, ProjectInfo, SettingsState } from "@/shared/types";
+import {
+  ImageFile,
+  Thread,
+  GenerateParams,
+  ProjectInfo,
+  SettingsState,
+  PromptPresetCategory,
+  PromptPresetScope,
+} from "@/shared/types";
 
 let _activeProjectId: string | null = null;
 
@@ -71,6 +79,88 @@ export async function generateMedia(params: GenerateParams) {
 }
 
 export const generateImage = generateMedia;
+
+// --- Prompt presets ---
+
+async function presetRequest(
+  url: string,
+  init?: RequestInit,
+): Promise<PromptPresetCategory[]> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...projectHeaders(),
+      ...init?.headers,
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Не удалось сохранить пресеты.");
+  return data;
+}
+
+export function fetchPromptPresets(): Promise<PromptPresetCategory[]> {
+  return presetRequest("/api/presets");
+}
+
+export function createPromptPresetCategory(data: {
+  name: string;
+  scope: PromptPresetScope;
+}) {
+  return presetRequest("/api/presets", {
+    method: "POST",
+    body: JSON.stringify({ type: "category", ...data }),
+  });
+}
+
+export function updatePromptPresetCategory(categoryId: string, name: string) {
+  return presetRequest("/api/presets", {
+    method: "PUT",
+    body: JSON.stringify({ type: "category", categoryId, name }),
+  });
+}
+
+export function deletePromptPresetCategory(categoryId: string) {
+  return presetRequest(`/api/presets?categoryId=${encodeURIComponent(categoryId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function createPromptPresetVariant(
+  categoryId: string,
+  data: { name: string; prompt: string },
+) {
+  return presetRequest("/api/presets", {
+    method: "POST",
+    body: JSON.stringify({ type: "variant", categoryId, ...data }),
+  });
+}
+
+export function updatePromptPresetVariant(
+  categoryId: string,
+  variantId: string,
+  data: { name: string; prompt: string },
+) {
+  return presetRequest("/api/presets", {
+    method: "PUT",
+    body: JSON.stringify({
+      type: "variant",
+      categoryId,
+      variantId,
+      ...data,
+    }),
+  });
+}
+
+export function deletePromptPresetVariant(
+  categoryId: string,
+  variantId: string,
+) {
+  return presetRequest(
+    `/api/presets?categoryId=${encodeURIComponent(categoryId)}&variantId=${encodeURIComponent(variantId)}`,
+    { method: "DELETE" },
+  );
+}
 
 // --- Settings (global) ---
 

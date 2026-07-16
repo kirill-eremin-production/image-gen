@@ -45,8 +45,13 @@ export function ThreadHistory({ thread, onImageDeleted }: ThreadHistoryProps) {
             {entry.model && (
               <div className="text-xs text-zinc-400 mb-1">{entry.model}</div>
             )}
-            <div className="font-semibold text-zinc-800 dark:text-zinc-200 mb-3">
-              {entry.prompt}
+            <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                Полный prompt, отправленный модели
+              </div>
+              <pre className="whitespace-pre-wrap font-sans text-sm font-semibold leading-relaxed text-zinc-800 dark:text-zinc-200">
+                {entry.prompt}
+              </pre>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
               {entry.images.map((img) => (

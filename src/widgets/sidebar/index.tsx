@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, X, Trash2, Settings } from "lucide-react";
+import { Plus, X, Trash2, Settings, WandSparkles } from "lucide-react";
 import { Thread, ProjectInfo } from "@/shared/types";
 
 interface SidebarProps {
@@ -16,6 +16,7 @@ interface SidebarProps {
   onCreateProject: () => void;
   onProjectSettings: (project: ProjectInfo) => void;
   onClearAllFiles: () => void;
+  onOpenPresets: () => void;
   onOpenSettings: () => void;
 }
 
@@ -32,6 +33,7 @@ export function Sidebar({
   onCreateProject,
   onProjectSettings,
   onClearAllFiles,
+  onOpenPresets,
   onOpenSettings,
 }: SidebarProps) {
   const sortedThreads = [...threads].sort((a, b) => {
@@ -156,6 +158,13 @@ export function Sidebar({
 
       {/* App settings */}
       <div className="p-3 border-t border-zinc-800 shrink-0">
+        <button
+          onClick={onOpenPresets}
+          className="mb-1 w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"
+        >
+          <WandSparkles size={16} />
+          Пресеты prompt
+        </button>
         <button
           onClick={onOpenSettings}
           className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 transition-colors"

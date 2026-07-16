@@ -1,7 +1,13 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { Thread, Settings, Project } from "@/shared/types";
+import {
+  Thread,
+  Settings,
+  Project,
+  PromptPresetCategory,
+  PromptPresetScope,
+} from "@/shared/types";
 
 const DATA_DIR =
   process.env.DATA_DIR ||
@@ -9,6 +15,7 @@ const DATA_DIR =
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const PROJECTS_DIR = path.join(DATA_DIR, "projects");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const GLOBAL_PROMPT_PRESETS_FILE = path.join(DATA_DIR, "prompt-presets.json");
 
 function projectBase(projectId?: string | null): string {
   return projectId ? path.join(PROJECTS_DIR, projectId) : DATA_DIR;
@@ -28,6 +35,15 @@ export function getVideosDir(projectId?: string | null) {
 
 export function getThreadsFile(projectId?: string | null) {
   return path.join(projectBase(projectId), "threads.json");
+}
+
+function getPromptPresetsFile(
+  scope: PromptPresetScope,
+  projectId?: string | null,
+) {
+  return scope === "global"
+    ? GLOBAL_PROMPT_PRESETS_FILE
+    : path.join(projectBase(projectId), "prompt-presets.json");
 }
 
 // Backward-compat exports for code that doesn't need project scope
@@ -107,6 +123,40 @@ export function getSettings(): Settings {
 export function saveSettings(settings: Settings) {
   ensureDirs();
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+}
+
+// --- Prompt presets ---
+
+export function getPromptPresetCategories(
+  scope: PromptPresetScope,
+  projectId?: string | null,
+): PromptPresetCategory[] {
+  if (scope === "project" && !projectId) return [];
+  ensureDirs(scope === "project" ? projectId : null);
+
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(getPromptPresetsFile(scope, projectId), "utf8"),
+    );
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePromptPresetCategories(
+  scope: PromptPresetScope,
+  categories: PromptPresetCategory[],
+  projectId?: string | null,
+) {
+  if (scope === "project" && !projectId) {
+    throw new Error("Для проектных пресетов нужен проект.");
+  }
+  ensureDirs(scope === "project" ? projectId : null);
+  fs.writeFileSync(
+    getPromptPresetsFile(scope, projectId),
+    JSON.stringify(categories, null, 2),
+  );
 }
 
 // --- Projects ---

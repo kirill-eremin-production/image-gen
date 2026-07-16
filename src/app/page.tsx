@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Thread, ImageFile, ProjectInfo } from "@/shared/types";
+import {
+  Thread,
+  ImageFile,
+  ProjectInfo,
+  PromptPresetCategory,
+} from "@/shared/types";
 import {
   fetchThreads,
   fetchFiles,
@@ -15,6 +20,7 @@ import {
   authProject,
   setActiveProjectId,
   deleteAllImages,
+  fetchPromptPresets,
 } from "@/shared/api";
 import { Sidebar } from "@/widgets/sidebar";
 import { GenerateImage } from "@/features/generate-image";
@@ -23,6 +29,7 @@ import { ImageLibrary } from "@/widgets/image-library";
 import { SettingsDialog } from "@/features/settings-dialog";
 import { ProjectDialog } from "@/features/project-dialog";
 import { ProjectPasswordDialog } from "@/features/project-password-dialog";
+import { PromptPresets } from "@/features/prompt-presets";
 
 const ACTIVE_PROJECT_STORAGE_KEY = "image-generator-active-project-id";
 const UNLOCKED_PROJECTS_COOKIE = "unlocked_projects";
@@ -54,6 +61,8 @@ export default function Home() {
   const [videos, setVideos] = useState<ImageFile[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [presetCategories, setPresetCategories] = useState<PromptPresetCategory[]>([]);
+  const [showPromptPresets, setShowPromptPresets] = useState(false);
 
   // Projects state
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -133,13 +142,15 @@ export default function Home() {
       fetchFiles("references"),
       fetchFiles("generated"),
       fetchFiles("videos"),
-    ]).then(([threadsData, refs, gens, vids]) => {
+      fetchPromptPresets(),
+    ]).then(([threadsData, refs, gens, vids, presets]) => {
       if (cancelled) return;
 
       setThreads(Array.isArray(threadsData) ? threadsData : []);
       setReferences(Array.isArray(refs) ? refs : []);
       setGenerated(Array.isArray(gens) ? gens : []);
       setVideos(Array.isArray(vids) ? vids : []);
+      setPresetCategories(Array.isArray(presets) ? presets : []);
       setCurrentThreadId(null);
       setSelectedImages(new Set());
     });
@@ -313,6 +324,7 @@ export default function Home() {
           setShowProjectDialog(true);
         }}
         onProjectSettings={handleProjectSettings}
+        onOpenPresets={() => setShowPromptPresets(true)}
         onOpenSettings={() => setShowSettings(true)}
         onClearAllFiles={async () => {
           if (!confirm("Удалить все файлы проекта (чаты, референсы, генерации)? Это действие необратимо.")) return;
@@ -329,6 +341,16 @@ export default function Home() {
 
       <main className="flex-1 overflow-y-auto p-6">
         <div className="max-w-4xl mx-auto">
+          {showPromptPresets ? (
+            <PromptPresets
+              categories={presetCategories}
+              activeProjectId={effectiveActiveProjectId}
+              activeProjectName={activeProject?.name}
+              onChange={setPresetCategories}
+              onClose={() => setShowPromptPresets(false)}
+            />
+          ) : (
+            <>
           <h1 className="text-2xl font-bold text-zinc-800 dark:text-zinc-100 mb-5 flex items-center gap-3">
             {activeProject && (
               <span
@@ -346,8 +368,11 @@ export default function Home() {
           </h1>
 
           <GenerateImage
+            key={effectiveActiveProjectId || "global"}
             selectedImages={selectedImages}
             currentThreadId={currentThreadId}
+            presetCategories={presetCategories}
+            onOpenPresets={() => setShowPromptPresets(true)}
             onGenerated={handleGenerated}
           />
 
@@ -367,6 +392,8 @@ export default function Home() {
             onToggleSelect={handleToggleSelect}
             onImagesChanged={loadLibrary}
           />
+            </>
+          )}
         </div>
       </main>
     </div>
