@@ -53,7 +53,11 @@ function findBuiltAppInDist(distDir, fallbackAppName) {
     path.join(distDir, "mac-universal"),
   ];
 
-  const possibleNames = [`${fallbackAppName}.app`, "Image Generator.app"].filter(Boolean);
+  const possibleNames = [
+    `${fallbackAppName}.app`,
+    "Narisuy.app",
+    "Image Generator.app",
+  ].filter(Boolean);
 
   for (const dir of preferredDirs) {
     if (!fs.existsSync(dir)) {
@@ -138,7 +142,11 @@ function installAppBundle({ sourceAppPath, sourceLabel, configuredAppName }) {
 
   ensureWritableApplications();
 
-  const toDelete = new Set([targetByBundle, targetByConfig]);
+  const toDelete = new Set([
+    targetByBundle,
+    targetByConfig,
+    path.join("/Applications", "Image Generator.app"),
+  ]);
   for (const destination of toDelete) {
     safeRemove(destination);
   }
@@ -170,7 +178,7 @@ function installMac() {
   const appName =
     (typeof buildConfig.productName === "string" && buildConfig.productName.trim()) ||
     (typeof packageJson.name === "string" && packageJson.name) ||
-    "Image Generator";
+    "Narisuy";
 
   const unpackedAppPath = findBuiltAppInDist(root, appName);
   if (unpackedAppPath) {
@@ -185,7 +193,7 @@ function installMac() {
   const dmgName = findLatestDmgFile(root);
   const dmgPath = path.join(root, dmgName);
 
-  const mountPoint = fs.mkdtempSync(path.join(os.tmpdir(), "image-generator-dmg-"));
+  const mountPoint = fs.mkdtempSync(path.join(os.tmpdir(), "narisuy-dmg-"));
 
   try {
     execFileSync("hdiutil", [

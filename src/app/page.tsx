@@ -342,7 +342,7 @@ export default function Home() {
               ? currentThread.title
               : activeProject
                 ? activeProject.name
-                : "Генератор картинок"}
+                : "Narisuy"}
           </h1>
 
           <GenerateImage

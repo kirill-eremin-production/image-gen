@@ -3,7 +3,9 @@ import path from "path";
 import crypto from "crypto";
 import { Thread, Settings, Project } from "@/shared/types";
 
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+const DATA_DIR =
+  process.env.DATA_DIR ||
+  path.join(/* turbopackIgnore: true */ process.cwd(), "data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 const PROJECTS_DIR = path.join(DATA_DIR, "projects");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");

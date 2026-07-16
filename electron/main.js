@@ -1,13 +1,31 @@
 const { app, BrowserWindow, ipcMain, systemPreferences } = require("electron");
 const { fork } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const net = require("net");
 
 const PORT = 50911;
 const isDev = !app.isPackaged;
+const DEV_ICON_PATH = path.join(__dirname, "../assets/icon.png");
 
 let mainWindow;
 let serverProcess;
+
+function migrateLegacyData() {
+  if (isDev) return;
+
+  const legacyDataPath = path.join(
+    app.getPath("appData"),
+    "Image Generator",
+    "data",
+  );
+  const currentDataPath = path.join(app.getPath("userData"), "data");
+
+  if (fs.existsSync(legacyDataPath) && !fs.existsSync(currentDataPath)) {
+    fs.mkdirSync(path.dirname(currentDataPath), { recursive: true });
+    fs.cpSync(legacyDataPath, currentDataPath, { recursive: true });
+  }
+}
 
 function waitForPort(port, timeout = 30000) {
   return new Promise((resolve, reject) => {
@@ -69,6 +87,7 @@ function startServer() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+    title: "Narisuy",
     width: 1200,
     height: 900,
     webPreferences: {
@@ -107,6 +126,10 @@ ipcMain.handle("prompt-touch-id", async (_event, reason) => {
 
 app.on("ready", async () => {
   try {
+    if (isDev && process.platform === "darwin" && app.dock) {
+      app.dock.setIcon(DEV_ICON_PATH);
+    }
+    migrateLegacyData();
     await startServer();
     createWindow();
   } catch (e) {
