@@ -18,7 +18,9 @@ export async function DELETE(req: NextRequest) {
 
   if (all === "true") {
     if (!fs.existsSync(dir)) return NextResponse.json({ ok: true });
-    const files = fs.readdirSync(dir).filter((f) => /\.(png|jpg|jpeg|gif|webp)$/i.test(f));
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => /\.(png|jpg|jpeg|gif|webp|mp4|webm|mov)$/i.test(f));
     for (const file of files) {
       fs.unlinkSync(path.join(dir, file));
     }

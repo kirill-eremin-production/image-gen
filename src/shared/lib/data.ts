@@ -20,6 +20,10 @@ export function getGensDir(projectId?: string | null) {
   return path.join(projectBase(projectId), "generated");
 }
 
+export function getVideosDir(projectId?: string | null) {
+  return path.join(projectBase(projectId), "videos");
+}
+
 export function getThreadsFile(projectId?: string | null) {
   return path.join(projectBase(projectId), "threads.json");
 }
@@ -27,15 +31,17 @@ export function getThreadsFile(projectId?: string | null) {
 // Backward-compat exports for code that doesn't need project scope
 export const REFS_DIR = getRefsDir();
 export const GENS_DIR = getGensDir();
+export const VIDEOS_DIR = getVideosDir();
 export const THREADS_FILE = getThreadsFile();
 
 export function ensureDirs(projectId?: string | null) {
   const base = projectBase(projectId);
   const refs = getRefsDir(projectId);
   const gens = getGensDir(projectId);
+  const videos = getVideosDir(projectId);
   const threadsFile = getThreadsFile(projectId);
 
-  [base, refs, gens].forEach((dir) => {
+  [base, refs, gens, videos].forEach((dir) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   });
   if (!fs.existsSync(threadsFile)) {
@@ -44,7 +50,9 @@ export function ensureDirs(projectId?: string | null) {
 }
 
 export function resolveDir(type: string, projectId?: string | null) {
-  return type === "references" ? getRefsDir(projectId) : getGensDir(projectId);
+  if (type === "references") return getRefsDir(projectId);
+  if (type === "videos") return getVideosDir(projectId);
+  return getGensDir(projectId);
 }
 
 // --- Threads ---

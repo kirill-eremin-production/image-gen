@@ -19,10 +19,15 @@ export async function GET(req: NextRequest) {
   const projectQuery = projectId ? `&project=${projectId}` : "";
   const files = fs
     .readdirSync(dir)
-    .filter((file) => /\.(png|jpg|jpeg|gif|webp)$/i.test(file))
+    .filter((file) =>
+      type === "videos"
+        ? /\.(mp4|webm|mov)$/i.test(file)
+        : /\.(png|jpg|jpeg|gif|webp)$/i.test(file),
+    )
     .map((file) => ({
       name: file,
       url: `/api/view?type=${type}&name=${file}${projectQuery}`,
+      kind: type === "videos" ? "video" : "image",
     }));
 
   return NextResponse.json(files);

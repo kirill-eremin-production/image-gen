@@ -51,6 +51,7 @@ export default function Home() {
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [references, setReferences] = useState<ImageFile[]>([]);
   const [generated, setGenerated] = useState<ImageFile[]>([]);
+  const [videos, setVideos] = useState<ImageFile[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
@@ -82,12 +83,14 @@ export default function Home() {
   }, []);
 
   const loadLibrary = useCallback(async () => {
-    const [refs, gens] = await Promise.all([
+    const [refs, gens, vids] = await Promise.all([
       fetchFiles("references"),
       fetchFiles("generated"),
+      fetchFiles("videos"),
     ]);
     setReferences(Array.isArray(refs) ? refs : []);
     setGenerated(Array.isArray(gens) ? gens : []);
+    setVideos(Array.isArray(vids) ? vids : []);
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -129,12 +132,14 @@ export default function Home() {
       fetchThreads(),
       fetchFiles("references"),
       fetchFiles("generated"),
-    ]).then(([threadsData, refs, gens]) => {
+      fetchFiles("videos"),
+    ]).then(([threadsData, refs, gens, vids]) => {
       if (cancelled) return;
 
       setThreads(Array.isArray(threadsData) ? threadsData : []);
       setReferences(Array.isArray(refs) ? refs : []);
       setGenerated(Array.isArray(gens) ? gens : []);
+      setVideos(Array.isArray(vids) ? vids : []);
       setCurrentThreadId(null);
       setSelectedImages(new Set());
     });
@@ -315,6 +320,7 @@ export default function Home() {
             clearAllThreads(),
             deleteAllImages("references"),
             deleteAllImages("generated"),
+            deleteAllImages("videos"),
           ]);
           setCurrentThreadId(null);
           await Promise.all([loadThreads(), loadLibrary()]);
@@ -356,6 +362,7 @@ export default function Home() {
           <ImageLibrary
             references={references}
             generated={generated}
+            videos={videos}
             selectedImages={selectedImages}
             onToggleSelect={handleToggleSelect}
             onImagesChanged={loadLibrary}

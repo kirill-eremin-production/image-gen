@@ -1,6 +1,7 @@
 export interface ImageFile {
   name: string;
   url: string;
+  kind?: "image" | "video";
 }
 
 export interface HistoryEntry {
@@ -9,6 +10,14 @@ export interface HistoryEntry {
   resolution: string;
   aspectRatio: string;
   images: ImageFile[];
+  videos?: ImageFile[];
+  mediaType?: "image" | "video";
+  model?: string;
+  duration?: number;
+  generateAudio?: boolean;
+  seed?: number | null;
+  negativePrompt?: string;
+  videoJobId?: string;
   cost: number | null;
 }
 
@@ -43,10 +52,20 @@ export interface ProjectInfo {
 }
 
 export interface GenerateParams {
+  mediaType: "image" | "video";
   prompt: string;
   model: string;
   resolution: string;
   aspectRatio: string;
   references: string[];
   threadId: string | null;
+  duration?: number;
+  generateAudio?: boolean;
+  seed?: number | null;
+  negativePrompt?: string;
+  enhancePrompt?: boolean;
+  referenceMode?: "reference" | "frames";
+  action?: "submit" | "poll";
+  jobId?: string;
+  pollingUrl?: string;
 }

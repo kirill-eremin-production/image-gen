@@ -24,6 +24,7 @@ export function ImageCard({
   largePreview,
 }: ImageCardProps) {
   const src = imageUrl(type, file.name);
+  const isVideo = file.kind === "video" || type === "videos";
 
   return (
     <div
@@ -33,15 +34,24 @@ export function ImageCard({
           : "border-transparent hover:border-zinc-300 dark:hover:border-zinc-600"
       }`}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={file.name}
-        onClick={onSelect}
-        className={`w-full object-contain cursor-pointer ${
-          largePreview ? "max-h-[500px]" : "max-h-[300px]"
-        }`}
-      />
+      {isVideo ? (
+        <video
+          src={src}
+          controls
+          preload="metadata"
+          className={`w-full object-contain ${largePreview ? "max-h-[500px]" : "max-h-[300px]"}`}
+        />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={file.name}
+          onClick={onSelect}
+          className={`w-full object-contain ${onSelect ? "cursor-pointer" : ""} ${
+            largePreview ? "max-h-[500px]" : "max-h-[300px]"
+          }`}
+        />
+      )}
       <div className="flex justify-center gap-1 p-1 bg-white dark:bg-zinc-900">
         <button
           onClick={onReveal}

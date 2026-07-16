@@ -22,17 +22,29 @@ export function ThreadHistory({ thread, onImageDeleted }: ThreadHistoryProps) {
     onImageDeleted();
   }
 
+  async function handleDeleteVideo(name: string) {
+    if (!confirm("Удалить это видео?")) return;
+    await deleteImage("videos", name);
+    onImageDeleted();
+  }
+
   return (
     <div className="mt-6 space-y-6">
       {thread.history.map((entry, i) => {
         const costStr = entry.cost != null ? ` | $${entry.cost.toFixed(4)}` : "";
+        const mediaLabel = entry.mediaType === "video" ? "Видео" : "Изображение";
+        const durationStr = entry.duration ? ` | ${entry.duration} сек.` : "";
+        const audioStr = entry.mediaType === "video" ? ` | звук: ${entry.generateAudio ? "да" : "нет"}` : "";
         return (
           <div key={i} className="border-b border-zinc-200 dark:border-zinc-800 pb-5">
             <div className="text-xs text-zinc-500 mb-1">
-              {new Date(entry.timestamp).toLocaleString()} | {entry.resolution} |{" "}
-              {entry.aspectRatio}
+              {new Date(entry.timestamp).toLocaleString()} | {mediaLabel} | {entry.resolution} |{" "}
+              {entry.aspectRatio}{durationStr}{audioStr}
               {costStr}
             </div>
+            {entry.model && (
+              <div className="text-xs text-zinc-400 mb-1">{entry.model}</div>
+            )}
             <div className="font-semibold text-zinc-800 dark:text-zinc-200 mb-3">
               {entry.prompt}
             </div>
@@ -45,6 +57,16 @@ export function ThreadHistory({ thread, onImageDeleted }: ThreadHistoryProps) {
                   largePreview
                   onReveal={() => handleReveal(img.name)}
                   onDelete={() => handleDelete(img.name)}
+                />
+              ))}
+              {(entry.videos || []).map((video) => (
+                <ImageCard
+                  key={video.name}
+                  file={{ ...video, kind: "video" }}
+                  type="videos"
+                  largePreview
+                  onReveal={() => revealImage("videos", video.name)}
+                  onDelete={() => handleDeleteVideo(video.name)}
                 />
               ))}
             </div>

@@ -17,7 +17,7 @@ export function imageUrl(type: string, name: string) {
   return `/api/view?type=${type}&name=${name}${projectQuery}`;
 }
 
-export async function fetchFiles(type: "references" | "generated"): Promise<ImageFile[]> {
+export async function fetchFiles(type: "references" | "generated" | "videos"): Promise<ImageFile[]> {
   const res = await fetch(`/api/files?type=${type}`, { headers: projectHeaders() });
   return res.json();
 }
@@ -29,7 +29,7 @@ export async function deleteImage(type: string, name: string) {
   });
 }
 
-export async function deleteAllImages(type: "references" | "generated") {
+export async function deleteAllImages(type: "references" | "generated" | "videos") {
   return fetch(`/api/delete?type=${type}&all=true`, {
     method: "DELETE",
     headers: projectHeaders(),
@@ -57,14 +57,20 @@ export async function clearAllThreads() {
 
 // --- Generate ---
 
-export async function generateImage(params: GenerateParams) {
+export async function generateMedia(params: GenerateParams) {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...projectHeaders() },
     body: JSON.stringify(params),
   });
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error?.message || data.error || "Ошибка генерации");
+  }
+  return data;
 }
+
+export const generateImage = generateMedia;
 
 // --- Settings (global) ---
 
