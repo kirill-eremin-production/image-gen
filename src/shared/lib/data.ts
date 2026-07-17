@@ -105,6 +105,24 @@ export function saveBase64Image(base64String: string, directory: string, prefix:
   return filename;
 }
 
+export function saveBase64ImageOnce(
+  base64String: string,
+  directory: string,
+  filenameStem: string,
+): string | null {
+  const matches = base64String.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+  if (!matches || matches.length !== 3) return null;
+
+  const extension = matches[1];
+  const safeStem = filenameStem.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const filename = `${safeStem}.${extension}`;
+  const filePath = path.join(directory, filename);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, Buffer.from(matches[2], "base64"));
+  }
+  return filename;
+}
+
 // --- Settings (global) ---
 
 const DEFAULT_SETTINGS: Settings = {

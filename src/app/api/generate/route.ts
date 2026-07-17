@@ -9,12 +9,19 @@ import {
   getThreads,
   saveThreads,
   saveBase64Image,
+  saveBase64ImageOnce,
   resolveDir,
   getSettings,
 } from "@/shared/lib/data";
 import { checkProjectAccess, denied } from "@/shared/lib/projectContext";
 import { IMAGE_MODELS, VIDEO_MODELS } from "@/shared/config";
-import { GenerateParams, ImageFile, Thread } from "@/shared/types";
+import {
+  GenerateParams,
+  GenerationReference,
+  GenerationReferenceRole,
+  ImageFile,
+  Thread,
+} from "@/shared/types";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1";
 const MAX_REFERENCES = 14;
@@ -133,15 +140,24 @@ function mimeType(filename: string) {
 }
 
 function prepareReferences(
-  references: string[],
+  params: GenerateParams,
   projectId: string | null,
   refsDir: string,
-  saveUploaded = true,
 ) {
   const prepared: string[] = [];
+  const files: GenerationReference[] = [];
+  const references = params.references || [];
 
-  for (const reference of references.slice(0, MAX_REFERENCES)) {
+  function roleForIndex(index: number): GenerationReferenceRole {
+    if (params.mediaType === "video" && params.referenceMode === "frames") {
+      return index === 0 ? "first_frame" : "last_frame";
+    }
+    return index === 0 ? "primary" : "secondary";
+  }
+
+  for (const [index, reference] of references.slice(0, MAX_REFERENCES).entries()) {
     let value = reference;
+    const role = roleForIndex(index);
 
     if (reference.startsWith("/api/view")) {
       const refUrl = new URL(reference, "http://localhost");
@@ -154,8 +170,45 @@ function prepareReferences(
 
       const fileData = fs.readFileSync(filePath);
       value = `data:${mimeType(name)};base64,${fileData.toString("base64")}`;
-    } else if (reference.startsWith("data:image") && saveUploaded) {
-      saveBase64Image(reference, refsDir, "ref");
+      const projectQuery = projectId ? `&project=${projectId}` : "";
+      files.push({
+        name: path.basename(name),
+        url: `/api/view?type=${type}&name=${encodeURIComponent(path.basename(name))}${projectQuery}`,
+        type: type === "references" ? "references" : "generated",
+        source: "library",
+        order: index,
+        role,
+      });
+    } else if (reference.startsWith("data:image")) {
+      if (params.saveReferences !== false) {
+        const filename = params.generationBatchId
+          ? saveBase64ImageOnce(
+              reference,
+              refsDir,
+              `ref_${params.generationBatchId}_${index}`,
+            )
+          : saveBase64Image(reference, refsDir, "ref");
+        if (filename) {
+          const projectQuery = projectId ? `&project=${projectId}` : "";
+          files.push({
+            name: filename,
+            url: `/api/view?type=references&name=${encodeURIComponent(filename)}${projectQuery}`,
+            type: "references",
+            source: "upload",
+            order: index,
+            role,
+          });
+        }
+      }
+    } else if (/^https?:\/\//i.test(reference)) {
+      files.push({
+        name: `reference_${index + 1}`,
+        url: reference,
+        type: "external",
+        source: "external",
+        order: index,
+        role,
+      });
     } else if (!/^https?:\/\//i.test(reference)) {
       continue;
     }
@@ -163,7 +216,7 @@ function prepareReferences(
     prepared.push(value);
   }
 
-  return prepared;
+  return { prepared, files };
 }
 
 function getOrCreateThread(threads: Thread[], threadId: string | null, prompt: string) {
@@ -228,11 +281,10 @@ async function generateImage(
 ) {
   const refsDir = getRefsDir(projectId);
   const gensDir = getGensDir(projectId);
-  const references = prepareReferences(
-    params.references || [],
+  const { prepared: references, files: referenceFiles } = prepareReferences(
+    params,
     projectId,
     refsDir,
-    params.saveReferences !== false,
   );
   const content: Array<Record<string, unknown>> = references.map((url) => ({
     type: "image_url",
@@ -319,6 +371,15 @@ async function generateImage(
 
   if (batchEntry) {
     batchEntry.images.push(...savedImages);
+    const referencesByOrder = new Map(
+      (batchEntry.references || []).map((reference) => [reference.order, reference]),
+    );
+    for (const reference of referenceFiles) {
+      referencesByOrder.set(reference.order, reference);
+    }
+    batchEntry.references = [...referencesByOrder.values()].sort(
+      (a, b) => a.order - b.order,
+    );
     if (totalCost != null) {
       batchEntry.cost = (batchEntry.cost || 0) + totalCost;
     }
@@ -333,6 +394,7 @@ async function generateImage(
       mediaType: "image",
       model: params.model,
       generationBatchId: params.generationBatchId,
+      references: referenceFiles,
       cost: totalCost,
     });
   }
@@ -358,8 +420,8 @@ async function submitVideo(
   projectId: string | null,
   key: string,
 ) {
-  const references = prepareReferences(
-    params.references || [],
+  const { prepared: references, files: referenceFiles } = prepareReferences(
+    params,
     projectId,
     getRefsDir(projectId),
   );
@@ -415,7 +477,7 @@ async function submitVideo(
   }
 
   const job = (await response.json()) as VideoJob;
-  return NextResponse.json(job, { status: 202 });
+  return NextResponse.json({ ...job, referenceFiles }, { status: 202 });
 }
 
 async function pollVideo(
@@ -510,6 +572,7 @@ async function pollVideo(
       seed: params.seed ?? null,
       negativePrompt: params.negativePrompt,
       videoJobId: params.jobId,
+      references: params.referenceFiles || [],
       cost,
     });
     thread.history.sort(

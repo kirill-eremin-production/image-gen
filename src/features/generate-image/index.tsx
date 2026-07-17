@@ -1,10 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Film, ImageIcon, Plus, Settings2, Sparkles } from "lucide-react";
+import { Film, ImageIcon, Plus, Settings2, Sparkles, X } from "lucide-react";
 import { IMAGE_MODELS, MediaType, VIDEO_MODELS } from "@/shared/config";
 import { generateMedia } from "@/shared/api";
-import { GenerateParams, HistoryEntry, PromptPresetCategory } from "@/shared/types";
+import {
+  GenerateParams,
+  GenerationReference,
+  GenerationReferenceRole,
+  HistoryEntry,
+  PromptPresetCategory,
+} from "@/shared/types";
 
 export interface PendingGeneration {
   jobId: string;
@@ -15,6 +21,7 @@ export interface PendingGeneration {
 
 interface GenerateImageProps {
   selectedImages: Set<string>;
+  onToggleSelectedImage: (url: string) => void;
   projectId: string | null;
   currentThreadId: string | null;
   presetCategories: PromptPresetCategory[];
@@ -43,8 +50,46 @@ function formatVariantCount(count: number) {
   return `${count} ${noun}`;
 }
 
+function referenceRole(
+  mediaType: MediaType,
+  referenceMode: "reference" | "frames",
+  index: number,
+): GenerationReferenceRole {
+  if (mediaType === "video" && referenceMode === "frames") {
+    return index === 0 ? "first_frame" : "last_frame";
+  }
+  return index === 0 ? "primary" : "secondary";
+}
+
+function libraryReference(url: string, order: number, role: GenerationReferenceRole) {
+  const parsed = new URL(url, "http://localhost");
+  const type = parsed.searchParams.get("type") === "references" ? "references" : "generated";
+  const name = parsed.searchParams.get("name") || `reference_${order + 1}`;
+  return {
+    name,
+    url,
+    type,
+    source: "library" as const,
+    order,
+    role,
+  } satisfies GenerationReference;
+}
+
+function referenceRoleLabel(
+  reference: GenerationReference,
+  mediaType: MediaType,
+) {
+  if (reference.role === "first_frame") return "Первый кадр · frame_images[0]";
+  if (reference.role === "last_frame") return "Последний кадр · frame_images[1]";
+  const field = mediaType === "video" ? "input_references" : "image_url";
+  return reference.role === "primary"
+    ? `Основной по порядку · ${field}[0]`
+    : `Дополнительный · ${field}[${reference.order}]`;
+}
+
 export function GenerateImage({
   selectedImages,
+  onToggleSelectedImage,
   projectId,
   currentThreadId,
   presetCategories,
@@ -67,7 +112,6 @@ export function GenerateImage({
   const [negativePrompt, setNegativePrompt] = useState("");
   const [enhancePrompt, setEnhancePrompt] = useState(true);
   const [referenceMode, setReferenceMode] = useState<"reference" | "frames">("reference");
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [selectedPresetVariants, setSelectedPresetVariants] = useState<
@@ -98,6 +142,31 @@ export function GenerateImage({
     }
     return presetParts.join("\n\n");
   }, [prompt, selectedPresets]);
+  const formReferences = useMemo(() => {
+    const existing = Array.from(selectedImages).map((url, order) => ({
+      file: libraryReference(
+        url,
+        order,
+        referenceRole(mediaType, referenceMode, order),
+      ),
+      uploadIndex: null as number | null,
+    }));
+    const uploaded = previews.map((url, uploadIndex) => {
+      const order = existing.length + uploadIndex;
+      return {
+        file: {
+          name: `Новый референс ${uploadIndex + 1}`,
+          url,
+          type: "references" as const,
+          source: "upload" as const,
+          order,
+          role: referenceRole(mediaType, referenceMode, order),
+        } satisfies GenerationReference,
+        uploadIndex,
+      };
+    });
+    return [...existing, ...uploaded];
+  }, [mediaType, previews, referenceMode, selectedImages]);
 
   useEffect(() => {
     if (!selectedModel.resolutions.includes(resolution)) {
@@ -132,31 +201,30 @@ export function GenerateImage({
     setStatus(null);
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files) return;
+    const results = await Promise.all(
+      Array.from(files).map(
+        (file) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(String(event.target?.result || ""));
+            reader.onerror = () => reject(new Error(`Не удалось прочитать ${file.name}`));
+            reader.readAsDataURL(file);
+          }),
+      ),
+    );
+    setPreviews((current) => [...current, ...results]);
+    e.target.value = "";
+  }
 
-    const newPreviews: string[] = [];
-    const newBase64: string[] = [];
-
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const result = ev.target?.result as string;
-        newPreviews.push(result);
-        newBase64.push(result);
-        if (newPreviews.length === files.length) {
-          setPreviews(newPreviews);
-          setUploadedFiles(newBase64);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+  function removeUploadedReference(index: number) {
+    setPreviews((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   function clearUploads() {
     setPreviews([]);
-    setUploadedFiles([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -180,6 +248,9 @@ export function GenerateImage({
         {
           ...baseParams,
           references: [],
+          referenceFiles: Array.isArray(submitted.referenceFiles)
+            ? (submitted.referenceFiles as GenerationReference[])
+            : [],
           action: "poll",
           jobId: String(job.id || ""),
           pollingUrl: String(job.polling_url || submitted.polling_url || ""),
@@ -206,13 +277,12 @@ export function GenerateImage({
       if (params.mediaType === "image") {
         const requestedCount = params.variantCount || 2;
         const variants = await Promise.allSettled(
-          Array.from({ length: requestedCount }, async (_, variantIndex) => {
+          Array.from({ length: requestedCount }, async () => {
             const data = await generateMedia(
               {
                 ...params,
                 variantCount: 1,
                 generationBatchId: jobId,
-                saveReferences: variantIndex === 0,
               },
               generationProjectId,
             );
@@ -279,7 +349,7 @@ export function GenerateImage({
   function handleGenerate() {
     if (!fullPrompt) return;
 
-    const references = [...uploadedFiles, ...Array.from(selectedImages)];
+    const references = formReferences.map((reference) => reference.file.url);
     if (references.length > 14) {
       setStatus({ type: "error", message: "Можно использовать не более 14 референсов." });
       return;
@@ -333,6 +403,7 @@ export function GenerateImage({
         generateAudio: mediaType === "video" ? generateAudio : undefined,
         seed: mediaType === "video" && seed.trim() ? Number(seed) : null,
         negativePrompt: mediaType === "video" ? negativePrompt.trim() : undefined,
+        references: formReferences.map((reference) => reference.file),
         status: "pending",
         placeholderCount: mediaType === "image" ? variantCount : 1,
         progress:
@@ -523,22 +594,78 @@ export function GenerateImage({
         </div>
       )}
 
-      <div className="mb-4">
-        <label className="block mb-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-          Загрузить референсы
-        </label>
-        <input ref={fileInputRef} type="file" multiple accept="image/*" onChange={handleFileChange} className="w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/30 dark:file:text-blue-400" />
-        {mediaType === "video" && (
-          <p className="text-xs text-zinc-400 mt-1">
-            {referenceMode === "frames" ? "Первое изображение станет начальным кадром, второе — конечным." : "Изображения направляют стиль, объект и визуальную идентичность ролика."}
+      <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-700 dark:bg-zinc-800/40">
+        <div className="mb-3">
+          <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Референсы запроса
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+            {mediaType === "video" && referenceMode === "frames"
+              ? "№1 отправляется как frame_images[0] / первый кадр, №2 — как frame_images[1] / последний кадр."
+              : mediaType === "video"
+                ? "№1 идёт первым в input_references и считается основным по порядку. Остальные передаются как дополнительные."
+                : "№1 идёт первым как image_url[0] и считается основным по порядку. У API нет отдельного поля primary; остальные изображения идут следующими image_url[n]."}
           </p>
-        )}
-        {previews.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {previews.map((src, index) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={index} src={src} alt="" className="w-15 h-15 object-contain rounded border border-zinc-200 dark:border-zinc-700" />
+          <p className="mt-1 text-[11px] text-zinc-400">
+            Файлы из правой библиотеки сохраняются ссылками. Новые загрузки будут скопированы в проект.
+          </p>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*"
+          onChange={handleFileChange}
+          className="w-full text-sm text-zinc-500 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/30 dark:file:text-blue-400"
+        />
+
+        {formReferences.length > 0 ? (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+            {formReferences.map(({ file, uploadIndex }) => (
+              <div
+                key={`${file.source}-${file.order}-${file.url.slice(0, 40)}`}
+                className="relative min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                <div className="relative aspect-square overflow-hidden bg-zinc-100 dark:bg-zinc-800">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={file.url}
+                    alt={`Референс ${file.order + 1}`}
+                    className="h-full w-full object-contain"
+                  />
+                  <span className="absolute left-1.5 top-1.5 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-bold text-white">
+                    №{file.order + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      uploadIndex == null
+                        ? onToggleSelectedImage(file.url)
+                        : removeUploadedReference(uploadIndex)
+                    }
+                    aria-label={`Убрать референс ${file.order + 1}`}
+                    className="absolute right-1.5 top-1.5 rounded-full bg-black/70 p-1 text-white hover:bg-red-600"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="p-2">
+                  <div className="truncate text-[11px] font-semibold text-zinc-700 dark:text-zinc-200">
+                    {referenceRoleLabel(file, mediaType)}
+                  </div>
+                  <div className="mt-1 truncate text-[10px] text-zinc-400">
+                    {file.source === "library"
+                      ? "Ссылка на файл в проекте"
+                      : "Новый файл · будет скопирован"}
+                  </div>
+                </div>
+              </div>
             ))}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-center text-xs text-zinc-400 dark:border-zinc-700">
+            Выберите изображения в правой колонке или загрузите новые файлы.
           </div>
         )}
       </div>

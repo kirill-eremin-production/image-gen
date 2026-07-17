@@ -64,7 +64,7 @@ export default function Home() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [presetCategories, setPresetCategories] = useState<PromptPresetCategory[]>([]);
   const [showPromptPresets, setShowPromptPresets] = useState(false);
-  const [leftPanelWidth, setLeftPanelWidth] = useState("25%");
+  const [leftPanelWidth, setLeftPanelWidth] = useState("18%");
   const [rightPanelWidth, setRightPanelWidth] = useState("25%");
   const [resizingPanel, setResizingPanel] = useState<"left" | "right" | null>(null);
 
@@ -121,7 +121,7 @@ export default function Home() {
   }, [resizingPanel]);
 
   function resetPanelWidths() {
-    setLeftPanelWidth("25%");
+    setLeftPanelWidth("18%");
     setRightPanelWidth("25%");
   }
 
@@ -178,8 +178,21 @@ export default function Home() {
         (entry) => entry.generationBatchId === generation.jobId,
       );
       if (batchEntryIndex >= 0) {
+        const persistedEntry = thread.history[batchEntryIndex];
+        const referencesByOrder = new Map(
+          (generation.entry.references || []).map((reference) => [
+            reference.order,
+            reference,
+          ]),
+        );
+        for (const reference of persistedEntry.references || []) {
+          referencesByOrder.set(reference.order, reference);
+        }
         thread.history[batchEntryIndex] = {
-          ...thread.history[batchEntryIndex],
+          ...persistedEntry,
+          references: [...referencesByOrder.values()].sort(
+            (a, b) => a.order - b.order,
+          ),
           status: generation.entry.status,
           placeholderCount: generation.entry.placeholderCount,
           progress: generation.entry.progress,
@@ -574,6 +587,7 @@ export default function Home() {
           <GenerateImage
             key={effectiveActiveProjectId || "global"}
             selectedImages={selectedImages}
+            onToggleSelectedImage={handleToggleSelect}
             projectId={effectiveActiveProjectId}
             currentThreadId={currentThreadId}
             presetCategories={presetCategories}

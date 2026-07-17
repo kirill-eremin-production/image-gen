@@ -4,6 +4,21 @@ export interface ImageFile {
   kind?: "image" | "video";
 }
 
+export type GenerationReferenceRole =
+  | "primary"
+  | "secondary"
+  | "first_frame"
+  | "last_frame";
+
+export interface GenerationReference {
+  name: string;
+  url: string;
+  type: "references" | "generated" | "external";
+  source: "library" | "upload" | "external";
+  order: number;
+  role: GenerationReferenceRole;
+}
+
 export interface HistoryEntry {
   id?: string;
   timestamp: string;
@@ -20,6 +35,7 @@ export interface HistoryEntry {
   negativePrompt?: string;
   videoJobId?: string;
   generationBatchId?: string;
+  references?: GenerationReference[];
   status?: "pending" | "failed";
   placeholderCount?: number;
   progress?: string;
@@ -84,6 +100,7 @@ export interface GenerateParams {
   generationBatchId?: string;
   saveReferences?: boolean;
   references: string[];
+  referenceFiles?: GenerationReference[];
   threadId: string | null;
   duration?: number;
   generateAudio?: boolean;
