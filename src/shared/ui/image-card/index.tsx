@@ -1,8 +1,10 @@
 "use client";
 
-import { FolderOpen, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { FolderOpen, Maximize2, Trash2 } from "lucide-react";
 import { ImageFile } from "@/shared/types";
 import { imageUrl } from "@/shared/api";
+import { ImageLightbox } from "@/shared/ui/image-lightbox";
 
 interface ImageCardProps {
   file: ImageFile;
@@ -23,6 +25,7 @@ export function ImageCard({
   onDelete,
   largePreview,
 }: ImageCardProps) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const src = imageUrl(type, file.name);
   const isVideo = file.kind === "video" || type === "videos";
 
@@ -53,21 +56,40 @@ export function ImageCard({
         />
       )}
       <div className="flex justify-center gap-1 p-1 bg-white dark:bg-zinc-900">
+        {!isVideo && (
+          <button
+            onClick={() => setPreviewOpen(true)}
+            aria-label="Смотреть на весь экран"
+            title="Смотреть на весь экран"
+            className="rounded-md bg-blue-600 p-2 text-white transition-colors hover:bg-blue-700"
+          >
+            <Maximize2 size={14} />
+          </button>
+        )}
         <button
           onClick={onReveal}
-          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-zinc-500 hover:bg-zinc-600 text-white transition-colors"
+          aria-label="Показать в Finder"
+          title="Показать в Finder"
+          className="rounded-md bg-zinc-500 p-2 text-white transition-colors hover:bg-zinc-600"
         >
-          <FolderOpen size={12} />
-          Finder
+          <FolderOpen size={14} />
         </button>
         <button
           onClick={onDelete}
-          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-red-500 hover:bg-red-600 text-white transition-colors"
+          aria-label="Удалить файл"
+          title="Удалить файл"
+          className="rounded-md bg-red-500 p-2 text-white transition-colors hover:bg-red-600"
         >
-          <Trash2 size={12} />
-          Удалить
+          <Trash2 size={14} />
         </button>
       </div>
+      {previewOpen && (
+        <ImageLightbox
+          src={src}
+          alt={file.name}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </div>
   );
 }

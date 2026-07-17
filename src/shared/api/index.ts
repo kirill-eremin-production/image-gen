@@ -14,8 +14,8 @@ export function setActiveProjectId(id: string | null) {
   _activeProjectId = id;
 }
 
-function projectHeaders(): HeadersInit {
-  return _activeProjectId ? { "x-project-id": _activeProjectId } : {};
+function projectHeaders(projectId: string | null = _activeProjectId): HeadersInit {
+  return projectId ? { "x-project-id": projectId } : {};
 }
 
 // --- Images ---
@@ -65,15 +65,29 @@ export async function clearAllThreads() {
 
 // --- Generate ---
 
-export async function generateMedia(params: GenerateParams) {
+export async function generateMedia(
+  params: GenerateParams,
+  projectId: string | null = _activeProjectId,
+) {
   const res = await fetch("/api/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...projectHeaders() },
+    headers: { "Content-Type": "application/json", ...projectHeaders(projectId) },
     body: JSON.stringify(params),
   });
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error?.message || data.error || "Ошибка генерации");
+    const error = data.error || {};
+    const message =
+      (typeof error === "object" ? error.message : error) || "Ошибка генерации";
+    const details = [String(message)];
+    if (error.providerMessage && error.providerMessage !== message) {
+      details.push(`Сообщение провайдера: ${error.providerMessage}`);
+    }
+    if (error.jobId) details.push(`ID задания: ${error.jobId}`);
+    if (error.generationId) {
+      details.push(`ID генерации: ${error.generationId}`);
+    }
+    throw new Error(details.join("\n"));
   }
   return data;
 }

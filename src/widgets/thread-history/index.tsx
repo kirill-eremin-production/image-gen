@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertCircle, Film, Loader2 } from "lucide-react";
 import { Thread } from "@/shared/types";
 import { ImageCard } from "@/shared/ui/image-card";
 import { revealImage, deleteImage } from "@/shared/api";
@@ -54,6 +55,38 @@ export function ThreadHistory({ thread, onImageDeleted }: ThreadHistoryProps) {
               </pre>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+              {entry.status === "pending" &&
+                Array.from(
+                  { length: entry.placeholderCount || 1 },
+                  (_, placeholderIndex) => (
+                    <div
+                      key={`${entry.id || i}-pending-${placeholderIndex}`}
+                      className="relative flex min-h-48 items-center justify-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800"
+                      style={{ aspectRatio: entry.aspectRatio.replace(":", " / ") }}
+                    >
+                      <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-zinc-100 via-zinc-200 to-zinc-100 dark:from-zinc-800 dark:via-zinc-700 dark:to-zinc-800" />
+                      <div className="relative flex max-w-[85%] flex-col items-center gap-3 text-center text-sm font-medium text-zinc-500 dark:text-zinc-300">
+                        {entry.mediaType === "video" ? (
+                          <Film className="animate-pulse" size={28} />
+                        ) : (
+                          <Loader2 className="animate-spin" size={28} />
+                        )}
+                        <span>{entry.progress || "Генерация…"}</span>
+                      </div>
+                    </div>
+                  ),
+                )}
+              {entry.status === "failed" && (
+                <div className="col-span-full flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+                  <AlertCircle className="mt-0.5 shrink-0" size={18} />
+                  <div>
+                    <div className="font-semibold">Генерация не удалась</div>
+                    <div className="mt-1 whitespace-pre-line text-xs opacity-90">
+                      {entry.error || "Неизвестная ошибка"}
+                    </div>
+                  </div>
+                </div>
+              )}
               {entry.images.map((img) => (
                 <ImageCard
                   key={img.name}

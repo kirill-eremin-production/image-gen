@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   Thread,
   ImageFile,
@@ -23,7 +23,7 @@ import {
   fetchPromptPresets,
 } from "@/shared/api";
 import { Sidebar } from "@/widgets/sidebar";
-import { GenerateImage } from "@/features/generate-image";
+import { GenerateImage, PendingGeneration } from "@/features/generate-image";
 import { ThreadHistory } from "@/widgets/thread-history";
 import { ImageLibrary } from "@/widgets/image-library";
 import { SettingsDialog } from "@/features/settings-dialog";
@@ -54,6 +54,7 @@ function getUnlockedProjectsFromCookie(): Set<string> {
 
 export default function Home() {
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [pendingGenerations, setPendingGenerations] = useState<PendingGeneration[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [references, setReferences] = useState<ImageFile[]>([]);
@@ -63,6 +64,9 @@ export default function Home() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [presetCategories, setPresetCategories] = useState<PromptPresetCategory[]>([]);
   const [showPromptPresets, setShowPromptPresets] = useState(false);
+  const [leftPanelWidth, setLeftPanelWidth] = useState("25%");
+  const [rightPanelWidth, setRightPanelWidth] = useState("25%");
+  const [resizingPanel, setResizingPanel] = useState<"left" | "right" | null>(null);
 
   // Projects state
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -85,6 +89,41 @@ export default function Home() {
       window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
     }
   }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!resizingPanel) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      if (resizingPanel === "left") {
+        setLeftPanelWidth(`${Math.max(0, event.clientX)}px`);
+      } else {
+        setRightPanelWidth(
+          `${Math.max(0, window.innerWidth - event.clientX)}px`,
+        );
+      }
+    }
+
+    function handlePointerUp() {
+      setResizingPanel(null);
+    }
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [resizingPanel]);
+
+  function resetPanelWidths() {
+    setLeftPanelWidth("25%");
+    setRightPanelWidth("25%");
+  }
 
   const loadThreads = useCallback(async () => {
     const data = await fetchThreads();
@@ -110,6 +149,49 @@ export default function Home() {
     activeProjectId && projects.some((project) => project.id === activeProjectId)
       ? activeProjectId
       : null;
+  const activeProjectRef = useRef<string | null>(effectiveActiveProjectId);
+
+  useEffect(() => {
+    activeProjectRef.current = effectiveActiveProjectId;
+  }, [effectiveActiveProjectId]);
+
+  const visibleThreads = useMemo(() => {
+    const merged = threads.map((thread) => ({
+      ...thread,
+      history: [...thread.history],
+    }));
+
+    for (const generation of pendingGenerations) {
+      if (generation.projectId !== effectiveActiveProjectId) continue;
+      let thread = merged.find((item) => item.id === generation.threadId);
+      if (!thread) {
+        thread = {
+          id: generation.threadId,
+          title:
+            generation.entry.prompt.substring(0, 30) +
+            (generation.entry.prompt.length > 30 ? "..." : ""),
+          history: [],
+        };
+        merged.push(thread);
+      }
+      const batchEntryIndex = thread.history.findIndex(
+        (entry) => entry.generationBatchId === generation.jobId,
+      );
+      if (batchEntryIndex >= 0) {
+        thread.history[batchEntryIndex] = {
+          ...thread.history[batchEntryIndex],
+          status: generation.entry.status,
+          placeholderCount: generation.entry.placeholderCount,
+          progress: generation.entry.progress,
+          error: generation.entry.error,
+        };
+      } else {
+        thread.history.push(generation.entry);
+      }
+    }
+
+    return merged;
+  }, [effectiveActiveProjectId, pendingGenerations, threads]);
 
   useEffect(() => {
     setActiveProjectId(effectiveActiveProjectId);
@@ -160,7 +242,7 @@ export default function Home() {
     };
   }, [effectiveActiveProjectId, settingsLoaded]);
 
-  const currentThread = threads.find((t) => t.id === currentThreadId) || null;
+  const currentThread = visibleThreads.find((t) => t.id === currentThreadId) || null;
   const activeProject =
     projects.find((p) => p.id === effectiveActiveProjectId) || null;
 
@@ -252,6 +334,13 @@ export default function Home() {
     if (!confirm("Удалить этот чат?")) return;
     await deleteThread(id);
     if (currentThreadId === id) setCurrentThreadId(null);
+    setPendingGenerations((current) =>
+      current.filter(
+        (generation) =>
+          generation.threadId !== id ||
+          generation.projectId !== effectiveActiveProjectId,
+      ),
+    );
     await loadThreads();
   }
 
@@ -259,6 +348,11 @@ export default function Home() {
     if (!confirm("Удалить все чаты?")) return;
     await clearAllThreads();
     setCurrentThreadId(null);
+    setPendingGenerations((current) =>
+      current.filter(
+        (generation) => generation.projectId !== effectiveActiveProjectId,
+      ),
+    );
     await loadThreads();
   }
 
@@ -271,16 +365,102 @@ export default function Home() {
     });
   }
 
-  async function handleGenerated(data: { threadId: string }) {
-    setCurrentThreadId(data.threadId);
+  function handleGenerationStarted(generation: PendingGeneration) {
+    setPendingGenerations((current) => [...current, generation]);
+    setCurrentThreadId(generation.threadId);
     setSelectedImages(new Set());
-    await Promise.all([loadThreads(), loadLibrary()]);
+  }
+
+  function handleGenerationProgress(data: { jobId: string; progress: string }) {
+    setPendingGenerations((current) =>
+      current.map((generation) =>
+        generation.jobId === data.jobId
+          ? {
+              ...generation,
+              entry: { ...generation.entry, progress: data.progress },
+            }
+          : generation,
+      ),
+    );
+  }
+
+  async function handleGenerationVariantFinished(data: {
+    jobId: string;
+    projectId: string | null;
+  }) {
+    if (activeProjectRef.current === data.projectId) {
+      await Promise.all([loadThreads(), loadLibrary()]);
+    }
+    setPendingGenerations((current) =>
+      current.map((generation) => {
+        if (generation.jobId !== data.jobId) return generation;
+        const remaining = Math.max(
+          0,
+          (generation.entry.placeholderCount || 1) - 1,
+        );
+        return {
+          ...generation,
+          entry: {
+            ...generation.entry,
+            placeholderCount: remaining,
+            progress: remaining > 0 ? `Осталось вариантов: ${remaining}` : undefined,
+          },
+        };
+      }),
+    );
+  }
+
+  async function handleGenerationFinished(data: {
+    jobId: string;
+    threadId: string;
+    projectId: string | null;
+    failedCount?: number;
+  }) {
+    if (activeProjectRef.current === data.projectId) {
+      await Promise.all([loadThreads(), loadLibrary()]);
+    }
+    setPendingGenerations((current) =>
+      data.failedCount
+        ? current.map((generation) =>
+            generation.jobId === data.jobId
+              ? {
+                  ...generation,
+                  entry: {
+                    ...generation.entry,
+                    status: "failed",
+                    placeholderCount: 0,
+                    progress: undefined,
+                    error: `Готовы не все варианты. Не удалось: ${data.failedCount}.`,
+                  },
+                }
+              : generation,
+          )
+        : current.filter((generation) => generation.jobId !== data.jobId),
+    );
+  }
+
+  function handleGenerationFailed(data: { jobId: string; error: string }) {
+    setPendingGenerations((current) =>
+      current.map((generation) =>
+        generation.jobId === data.jobId
+          ? {
+              ...generation,
+              entry: {
+                ...generation.entry,
+                status: "failed",
+                progress: undefined,
+                error: data.error,
+              },
+            }
+          : generation,
+      ),
+    );
   }
 
   if (!settingsLoaded) return null;
 
   return (
-    <div className="flex h-screen">
+    <>
       <SettingsDialog
         open={showSettings}
         onSaved={() => setShowSettings(false)}
@@ -309,38 +489,62 @@ export default function Home() {
         onCancel={() => setPasswordProject(null)}
       />
 
-      <Sidebar
-        threads={threads}
-        currentThreadId={currentThreadId}
-        onSelectThread={handleSelectThread}
-        onNewChat={handleNewChat}
-        onDeleteThread={handleDeleteThread}
-        onClearAll={handleClearAll}
-        projects={projects}
-        activeProjectId={effectiveActiveProjectId}
-        onSelectProject={handleSelectProject}
-        onCreateProject={() => {
-          setEditingProject(null);
-          setShowProjectDialog(true);
+      <div
+        className="grid h-screen min-w-0 overflow-hidden"
+        style={{
+          gridTemplateColumns: `${leftPanelWidth} 6px minmax(0, 1fr) 6px ${rightPanelWidth}`,
         }}
-        onProjectSettings={handleProjectSettings}
-        onOpenPresets={() => setShowPromptPresets(true)}
-        onOpenSettings={() => setShowSettings(true)}
-        onClearAllFiles={async () => {
-          if (!confirm("Удалить все файлы проекта (чаты, референсы, генерации)? Это действие необратимо.")) return;
-          await Promise.all([
-            clearAllThreads(),
-            deleteAllImages("references"),
-            deleteAllImages("generated"),
-            deleteAllImages("videos"),
-          ]);
-          setCurrentThreadId(null);
-          await Promise.all([loadThreads(), loadLibrary()]);
-        }}
-      />
+      >
+        <div className="min-w-0 overflow-hidden">
+          <Sidebar
+            threads={visibleThreads}
+            currentThreadId={currentThreadId}
+            onSelectThread={handleSelectThread}
+            onNewChat={handleNewChat}
+            onDeleteThread={handleDeleteThread}
+            onClearAll={handleClearAll}
+            projects={projects}
+            activeProjectId={effectiveActiveProjectId}
+            onSelectProject={handleSelectProject}
+            onCreateProject={() => {
+              setEditingProject(null);
+              setShowProjectDialog(true);
+            }}
+            onProjectSettings={handleProjectSettings}
+            onOpenPresets={() => setShowPromptPresets(true)}
+            onOpenSettings={() => setShowSettings(true)}
+            onClearAllFiles={async () => {
+              if (!confirm("Удалить все файлы проекта (чаты, референсы, генерации)? Это действие необратимо.")) return;
+              await Promise.all([
+                clearAllThreads(),
+                deleteAllImages("references"),
+                deleteAllImages("generated"),
+                deleteAllImages("videos"),
+              ]);
+              setCurrentThreadId(null);
+              setPendingGenerations((current) =>
+                current.filter(
+                  (generation) =>
+                    generation.projectId !== effectiveActiveProjectId,
+                ),
+              );
+              await Promise.all([loadThreads(), loadLibrary()]);
+            }}
+          />
+        </div>
 
-      <main className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-4xl mx-auto">
+        <div
+          role="separator"
+          aria-label="Изменить ширину левой колонки"
+          onPointerDown={() => setResizingPanel("left")}
+          onDoubleClick={resetPanelWidths}
+          className="group relative z-10 cursor-col-resize bg-zinc-200 transition-colors hover:bg-blue-500 dark:bg-zinc-800 dark:hover:bg-blue-500"
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1" />
+        </div>
+
+        <main className="min-w-0 overflow-y-auto p-6">
+          <div className="mx-auto max-w-5xl">
           {showPromptPresets ? (
             <PromptPresets
               categories={presetCategories}
@@ -370,10 +574,15 @@ export default function Home() {
           <GenerateImage
             key={effectiveActiveProjectId || "global"}
             selectedImages={selectedImages}
+            projectId={effectiveActiveProjectId}
             currentThreadId={currentThreadId}
             presetCategories={presetCategories}
             onOpenPresets={() => setShowPromptPresets(true)}
-            onGenerated={handleGenerated}
+            onGenerationStarted={handleGenerationStarted}
+            onGenerationProgress={handleGenerationProgress}
+            onGenerationVariantFinished={handleGenerationVariantFinished}
+            onGenerationFinished={handleGenerationFinished}
+            onGenerationFailed={handleGenerationFailed}
           />
 
           <ThreadHistory
@@ -384,6 +593,22 @@ export default function Home() {
             }}
           />
 
+            </>
+          )}
+          </div>
+        </main>
+
+        <div
+          role="separator"
+          aria-label="Изменить ширину правой колонки"
+          onPointerDown={() => setResizingPanel("right")}
+          onDoubleClick={resetPanelWidths}
+          className="group relative z-10 cursor-col-resize bg-zinc-200 transition-colors hover:bg-blue-500 dark:bg-zinc-800 dark:hover:bg-blue-500"
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1" />
+        </div>
+
+        <aside className="min-w-0 overflow-y-auto border-l border-zinc-200 dark:border-zinc-800">
           <ImageLibrary
             references={references}
             generated={generated}
@@ -392,10 +617,8 @@ export default function Home() {
             onToggleSelect={handleToggleSelect}
             onImagesChanged={loadLibrary}
           />
-            </>
-          )}
-        </div>
-      </main>
-    </div>
+        </aside>
+      </div>
+    </>
   );
 }

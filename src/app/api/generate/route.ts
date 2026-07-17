@@ -18,12 +18,15 @@ import { GenerateParams, ImageFile, Thread } from "@/shared/types";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1";
 const MAX_REFERENCES = 14;
+const DEFAULT_IMAGE_VARIANTS = 2;
+const MAX_IMAGE_VARIANTS = 10;
 
 interface VideoJob {
   id: string;
+  generation_id?: string;
   polling_url?: string;
   status: "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "expired";
-  error?: string;
+  error?: unknown;
   unsigned_urls?: string[];
   usage?: { cost?: number };
 }
@@ -37,11 +40,81 @@ function errorResponse(message: string, status = 400) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
-async function parseOpenRouterError(response: Response) {
+function providerErrorText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  const parts = [
+    record.message,
+    record.detail,
+    record.reason,
+    record.code,
+    record.filter_reason,
+    record.finish_reason,
+  ]
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+
+  if (parts.length > 0) return [...new Set(parts)].join(" · ");
+  if (record.error && record.error !== value) return providerErrorText(record.error);
+  return "";
+}
+
+function videoErrorResponse({
+  job,
+  providerMessage,
+  code,
+  fallbackMessage,
+  status = 422,
+}: {
+  job: VideoJob;
+  providerMessage?: string;
+  code: string;
+  fallbackMessage: string;
+  status?: number;
+}) {
+  const jobRecord = job as unknown as Record<string, unknown>;
+  const originalMessage = [
+    providerMessage?.trim(),
+    providerErrorText(job.error),
+    providerErrorText(jobRecord.provider_error),
+    providerErrorText(jobRecord.status_reason),
+    providerErrorText(jobRecord.moderation),
+  ]
+    .filter((item): item is string => Boolean(item))
+    .filter((item, index, items) => items.indexOf(item) === index)
+    .join(" · ");
+  const looksFiltered = /filter|safety|content policy|no output/i.test(
+    originalMessage,
+  );
+  const message = looksFiltered
+    ? "Видео не создано: провайдер завершил генерацию без результата. Скорее всего, prompt или референс был отклонён фильтром безопасности."
+    : fallbackMessage;
+
+  return NextResponse.json(
+    {
+      error: {
+        message,
+        code,
+        providerMessage: originalMessage || undefined,
+        jobId: job.id,
+        generationId: job.generation_id,
+      },
+    },
+    { status },
+  );
+}
+
+async function parseOpenRouterError(response: Response): Promise<string> {
   const text = await response.text();
   try {
-    const body = JSON.parse(text);
-    return body.error?.message || body.error || JSON.stringify(body);
+    const body = JSON.parse(text) as Record<string, unknown>;
+    return (
+      providerErrorText(body.error) ||
+      providerErrorText(body) ||
+      JSON.stringify(body)
+    );
   } catch {
     return text || `OpenRouter вернул ошибку ${response.status}.`;
   }
@@ -63,6 +136,7 @@ function prepareReferences(
   references: string[],
   projectId: string | null,
   refsDir: string,
+  saveUploaded = true,
 ) {
   const prepared: string[] = [];
 
@@ -80,7 +154,7 @@ function prepareReferences(
 
       const fileData = fs.readFileSync(filePath);
       value = `data:${mimeType(name)};base64,${fileData.toString("base64")}`;
-    } else if (reference.startsWith("data:image")) {
+    } else if (reference.startsWith("data:image") && saveUploaded) {
       saveBase64Image(reference, refsDir, "ref");
     } else if (!/^https?:\/\//i.test(reference)) {
       continue;
@@ -96,7 +170,7 @@ function getOrCreateThread(threads: Thread[], threadId: string | null, prompt: s
   let thread = threadId ? threads.find((item) => item.id === threadId) : undefined;
   if (!thread) {
     thread = {
-      id: Date.now().toString(),
+      id: threadId || Date.now().toString(),
       title: prompt.substring(0, 30) + (prompt.length > 30 ? "..." : ""),
       history: [],
     };
@@ -130,6 +204,15 @@ function validateParams(params: GenerateParams) {
     return "Для первого и последнего кадра можно использовать не более двух изображений.";
   }
   if (
+    params.mediaType === "image" &&
+    params.variantCount != null &&
+    (!Number.isInteger(params.variantCount) ||
+      params.variantCount < 1 ||
+      params.variantCount > MAX_IMAGE_VARIANTS)
+  ) {
+    return `Количество вариантов должно быть целым числом от 1 до ${MAX_IMAGE_VARIANTS}.`;
+  }
+  if (
     params.seed != null &&
     (!Number.isInteger(params.seed) || Number(params.seed) < 0)
   ) {
@@ -145,74 +228,127 @@ async function generateImage(
 ) {
   const refsDir = getRefsDir(projectId);
   const gensDir = getGensDir(projectId);
-  const references = prepareReferences(params.references || [], projectId, refsDir);
+  const references = prepareReferences(
+    params.references || [],
+    projectId,
+    refsDir,
+    params.saveReferences !== false,
+  );
   const content: Array<Record<string, unknown>> = references.map((url) => ({
     type: "image_url",
     image_url: { url },
   }));
   content.push({ type: "text", text: params.prompt.trim() });
-
-  const response = await fetch(`${OPENROUTER_API_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
+  const variantCount = params.variantCount ?? DEFAULT_IMAGE_VARIANTS;
+  const requestBody = JSON.stringify({
+    model: params.model,
+    messages: [{ role: "user", content }],
+    modalities: ["image", "text"],
+    image_config: {
+      image_size: params.resolution,
+      aspect_ratio: params.aspectRatio,
     },
-    body: JSON.stringify({
-      model: params.model,
-      messages: [{ role: "user", content }],
-      modalities: ["image", "text"],
-      image_config: {
-        image_size: params.resolution,
-        aspect_ratio: params.aspectRatio,
-      },
-    }),
   });
+  const variants = await Promise.allSettled(
+    Array.from({ length: variantCount }, async () => {
+      const response = await fetch(`${OPENROUTER_API_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: requestBody,
+      });
 
-  if (!response.ok) {
-    return errorResponse(await parseOpenRouterError(response), response.status);
-  }
+      if (!response.ok) {
+        throw new Error(await parseOpenRouterError(response));
+      }
+      return response.json();
+    }),
+  );
 
-  const result = await response.json();
   const savedImages: ImageFile[] = [];
+  let cost = 0;
+  let hasCost = false;
+  const errors: string[] = [];
 
-  for (const image of result.choices?.[0]?.message?.images || []) {
-    if (!image.image_url?.url?.startsWith("data:image")) continue;
-    const filename = saveBase64Image(image.image_url.url, gensDir, "gen");
-    if (!filename) continue;
-    const projectQuery = projectId ? `&project=${projectId}` : "";
-    savedImages.push({
-      name: filename,
-      url: `/api/view?type=generated&name=${filename}${projectQuery}`,
-      kind: "image",
-    });
+  for (const variant of variants) {
+    if (variant.status === "rejected") {
+      errors.push(
+        variant.reason instanceof Error ? variant.reason.message : "Ошибка генерации варианта.",
+      );
+      continue;
+    }
+
+    const result = variant.value;
+    const variantImages = result.choices?.[0]?.message?.images || [];
+    let savedVariant = false;
+    for (const image of variantImages) {
+      if (!image.image_url?.url?.startsWith("data:image")) continue;
+      const filename = saveBase64Image(image.image_url.url, gensDir, "gen");
+      if (!filename) continue;
+      const projectQuery = projectId ? `&project=${projectId}` : "";
+      savedImages.push({
+        name: filename,
+        url: `/api/view?type=generated&name=${filename}${projectQuery}`,
+        kind: "image",
+      });
+      savedVariant = true;
+    }
+    if (!savedVariant) {
+      errors.push(result.error?.message || "OpenRouter не вернул изображение.");
+    }
+    if (result.usage?.cost != null) {
+      cost += Number(result.usage.cost);
+      hasCost = true;
+    }
   }
 
   if (savedImages.length === 0) {
-    return errorResponse(result.error?.message || "OpenRouter не вернул изображение.", 502);
+    return errorResponse(errors[0] || "OpenRouter не вернул изображения.", 502);
   }
 
   const threads = getThreads(projectId);
   const thread = getOrCreateThread(threads, params.threadId, params.prompt);
-  const cost = result.usage?.cost ?? null;
-  thread.history.push({
-    timestamp: new Date().toISOString(),
-    prompt: params.prompt,
-    resolution: params.resolution,
-    aspectRatio: params.aspectRatio,
-    images: savedImages,
-    videos: [],
-    mediaType: "image",
-    model: params.model,
-    cost,
-  });
+  const totalCost = hasCost ? cost : null;
+  const batchEntry = params.generationBatchId
+    ? thread.history.find(
+        (entry) => entry.generationBatchId === params.generationBatchId,
+      )
+    : undefined;
+
+  if (batchEntry) {
+    batchEntry.images.push(...savedImages);
+    if (totalCost != null) {
+      batchEntry.cost = (batchEntry.cost || 0) + totalCost;
+    }
+  } else {
+    thread.history.push({
+      timestamp: params.submittedAt || new Date().toISOString(),
+      prompt: params.prompt,
+      resolution: params.resolution,
+      aspectRatio: params.aspectRatio,
+      images: savedImages,
+      videos: [],
+      mediaType: "image",
+      model: params.model,
+      generationBatchId: params.generationBatchId,
+      cost: totalCost,
+    });
+  }
+  thread.history.sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
   saveThreads(threads, projectId);
 
   return NextResponse.json({
     status: "completed",
     mediaType: "image",
     files: savedImages,
-    cost,
+    cost: totalCost,
+    requestedCount: variantCount,
+    completedCount: variants.length - errors.length,
+    failedCount: errors.length,
     threadId: thread.id,
   });
 }
@@ -298,6 +434,27 @@ async function pollVideo(
   }
 
   const job = (await statusResponse.json()) as VideoJob;
+  if (job.status === "failed") {
+    return videoErrorResponse({
+      job,
+      code: "VIDEO_GENERATION_FAILED",
+      fallbackMessage: "Провайдер не смог сгенерировать видео.",
+    });
+  }
+  if (job.status === "cancelled") {
+    return videoErrorResponse({
+      job,
+      code: "VIDEO_GENERATION_CANCELLED",
+      fallbackMessage: "Провайдер отменил задание генерации видео.",
+    });
+  }
+  if (job.status === "expired") {
+    return videoErrorResponse({
+      job,
+      code: "VIDEO_GENERATION_EXPIRED",
+      fallbackMessage: "Время хранения задания истекло до получения видео.",
+    });
+  }
   if (job.status !== "completed") return NextResponse.json(job);
 
   const videosDir = getVideosDir(projectId);
@@ -311,7 +468,14 @@ async function pollVideo(
       { headers: { Authorization: `Bearer ${key}` } },
     );
     if (!downloadResponse.ok) {
-      return errorResponse(await parseOpenRouterError(downloadResponse), downloadResponse.status);
+      return videoErrorResponse({
+        job,
+        providerMessage: await parseOpenRouterError(downloadResponse),
+        code: "VIDEO_NO_OUTPUT",
+        fallbackMessage:
+          "Генерация завершилась, но провайдер не вернул видеофайл.",
+        status: downloadResponse.status >= 500 ? 502 : 422,
+      });
     }
     fs.writeFileSync(filePath, Buffer.from(await downloadResponse.arrayBuffer()));
   }
@@ -333,7 +497,7 @@ async function pollVideo(
 
   if (!alreadySaved) {
     thread.history.push({
-      timestamp: new Date().toISOString(),
+      timestamp: params.submittedAt || new Date().toISOString(),
       prompt: params.prompt,
       resolution: params.resolution,
       aspectRatio: params.aspectRatio,
@@ -348,6 +512,9 @@ async function pollVideo(
       videoJobId: params.jobId,
       cost,
     });
+    thread.history.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
     saveThreads(threads, projectId);
   }
 

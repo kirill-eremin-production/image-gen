@@ -43,7 +43,7 @@ export function Sidebar({
   });
 
   return (
-    <aside className="w-64 bg-zinc-900 text-white flex flex-col shrink-0">
+    <aside className="flex h-full w-full min-w-0 flex-col bg-zinc-900 text-white">
       {/* Projects */}
       <div className="p-3 border-b border-zinc-800">
         <div className="flex items-center justify-between mb-2">

@@ -5,6 +5,7 @@ export interface ImageFile {
 }
 
 export interface HistoryEntry {
+  id?: string;
   timestamp: string;
   prompt: string;
   resolution: string;
@@ -18,6 +19,11 @@ export interface HistoryEntry {
   seed?: number | null;
   negativePrompt?: string;
   videoJobId?: string;
+  generationBatchId?: string;
+  status?: "pending" | "failed";
+  placeholderCount?: number;
+  progress?: string;
+  error?: string;
   cost: number | null;
 }
 
@@ -70,9 +76,13 @@ export interface PromptPresetCategory {
 export interface GenerateParams {
   mediaType: "image" | "video";
   prompt: string;
+  submittedAt?: string;
   model: string;
   resolution: string;
   aspectRatio: string;
+  variantCount?: number;
+  generationBatchId?: string;
+  saveReferences?: boolean;
   references: string[];
   threadId: string | null;
   duration?: number;

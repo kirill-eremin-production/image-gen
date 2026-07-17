@@ -43,9 +43,9 @@ export function ImageLibrary({
   const sortedVideos = [...videos].sort((a, b) => b.name.localeCompare(a.name));
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-xl p-5 shadow-sm border border-zinc-200 dark:border-zinc-800 mt-8">
+    <div className="min-h-full bg-white p-4 dark:bg-zinc-900">
       <div className="flex items-center justify-between pb-2 mb-4 border-b-2 border-blue-500">
-        <h3 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">
+        <h3 className="truncate text-base font-semibold text-zinc-800 dark:text-zinc-200">
           Библиотека референсов
         </h3>
         {sortedRefs.length > 0 && (
@@ -61,7 +61,7 @@ export function ImageLibrary({
       {sortedRefs.length === 0 ? (
         <p className="text-sm text-zinc-400">Нет референсов</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-3">
           {sortedRefs.map((file) => (
             <ImageCard
               key={file.name}
@@ -77,7 +77,7 @@ export function ImageLibrary({
       )}
 
       <div className="flex items-center justify-between pb-2 mb-4 mt-8 border-b-2 border-blue-500">
-        <h3 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">
+        <h3 className="truncate text-base font-semibold text-zinc-800 dark:text-zinc-200">
           Все сгенерированные
         </h3>
         {sortedGens.length > 0 && (
@@ -93,7 +93,7 @@ export function ImageLibrary({
       {sortedGens.length === 0 ? (
         <p className="text-sm text-zinc-400">Нет изображений</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-3">
           {sortedGens.map((file) => (
             <ImageCard
               key={file.name}
@@ -109,7 +109,7 @@ export function ImageLibrary({
       )}
 
       <div className="flex items-center justify-between pb-2 mb-4 mt-8 border-b-2 border-violet-500">
-        <h3 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">
+        <h3 className="truncate text-base font-semibold text-zinc-800 dark:text-zinc-200">
           Все сгенерированные видео
         </h3>
         {sortedVideos.length > 0 && (
@@ -125,7 +125,7 @@ export function ImageLibrary({
       {sortedVideos.length === 0 ? (
         <p className="text-sm text-zinc-400">Нет видео</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
           {sortedVideos.map((file) => (
             <ImageCard
               key={file.name}

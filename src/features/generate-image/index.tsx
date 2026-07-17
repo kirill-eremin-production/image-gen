@@ -1,17 +1,29 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Film, ImageIcon, Loader2, Plus, Settings2, Sparkles } from "lucide-react";
+import { Film, ImageIcon, Plus, Settings2, Sparkles } from "lucide-react";
 import { IMAGE_MODELS, MediaType, VIDEO_MODELS } from "@/shared/config";
 import { generateMedia } from "@/shared/api";
-import { GenerateParams, PromptPresetCategory } from "@/shared/types";
+import { GenerateParams, HistoryEntry, PromptPresetCategory } from "@/shared/types";
+
+export interface PendingGeneration {
+  jobId: string;
+  threadId: string;
+  projectId: string | null;
+  entry: HistoryEntry;
+}
 
 interface GenerateImageProps {
   selectedImages: Set<string>;
+  projectId: string | null;
   currentThreadId: string | null;
   presetCategories: PromptPresetCategory[];
   onOpenPresets: () => void;
-  onGenerated: (data: { threadId: string }) => void;
+  onGenerationStarted: (data: PendingGeneration) => void;
+  onGenerationProgress: (data: { jobId: string; progress: string }) => void;
+  onGenerationVariantFinished: (data: { jobId: string; projectId: string | null }) => void | Promise<void>;
+  onGenerationFinished: (data: { jobId: string; threadId: string; projectId: string | null; failedCount?: number }) => void;
+  onGenerationFailed: (data: { jobId: string; error: string }) => void;
 }
 
 type Status = {
@@ -26,18 +38,29 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatVariantCount(count: number) {
+  const noun = count === 1 ? "вариант" : count < 5 ? "варианта" : "вариантов";
+  return `${count} ${noun}`;
+}
+
 export function GenerateImage({
   selectedImages,
+  projectId,
   currentThreadId,
   presetCategories,
   onOpenPresets,
-  onGenerated,
+  onGenerationStarted,
+  onGenerationProgress,
+  onGenerationVariantFinished,
+  onGenerationFinished,
+  onGenerationFailed,
 }: GenerateImageProps) {
   const [mediaType, setMediaType] = useState<MediaType>("image");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(IMAGE_MODELS[0].value);
   const [resolution, setResolution] = useState("1K");
   const [aspectRatio, setAspectRatio] = useState("16:9");
+  const [variantCount, setVariantCount] = useState(2);
   const [duration, setDuration] = useState(8);
   const [generateAudio, setGenerateAudio] = useState(true);
   const [seed, setSeed] = useState("");
@@ -46,7 +69,6 @@ export function GenerateImage({
   const [referenceMode, setReferenceMode] = useState<"reference" | "frames">("reference");
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [selectedPresetVariants, setSelectedPresetVariants] = useState<
     Record<string, string>
@@ -138,24 +160,32 @@ export function GenerateImage({
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function pollVideo(baseParams: GenerateParams, submitted: Record<string, unknown>) {
+  async function pollVideo(
+    baseParams: GenerateParams,
+    submitted: Record<string, unknown>,
+    jobId: string,
+    generationProjectId: string | null,
+  ) {
     let job = submitted;
 
     for (let attempt = 1; attempt <= VIDEO_MAX_POLLS; attempt += 1) {
       if (job.status !== "completed") await wait(VIDEO_POLL_INTERVAL);
 
-      setStatus({
-        type: "info",
-        message: `Видео генерируется… проверка ${attempt}`,
+      onGenerationProgress({
+        jobId,
+        progress: `Видео генерируется… проверка ${attempt}`,
       });
 
-      job = await generateMedia({
-        ...baseParams,
-        references: [],
-        action: "poll",
-        jobId: String(job.id || ""),
-        pollingUrl: String(job.polling_url || submitted.polling_url || ""),
-      });
+      job = await generateMedia(
+        {
+          ...baseParams,
+          references: [],
+          action: "poll",
+          jobId: String(job.id || ""),
+          pollingUrl: String(job.polling_url || submitted.polling_url || ""),
+        },
+        generationProjectId,
+      );
 
       if (job.status === "completed") return job;
       if (["failed", "cancelled", "expired"].includes(String(job.status))) {
@@ -166,7 +196,87 @@ export function GenerateImage({
     throw new Error("Видео не было готово за 20 минут. Задание осталось в OpenRouter.");
   }
 
-  async function handleGenerate() {
+  async function runGeneration(
+    params: GenerateParams,
+    jobId: string,
+    threadId: string,
+    generationProjectId: string | null,
+  ) {
+    try {
+      if (params.mediaType === "image") {
+        const requestedCount = params.variantCount || 2;
+        const variants = await Promise.allSettled(
+          Array.from({ length: requestedCount }, async (_, variantIndex) => {
+            const data = await generateMedia(
+              {
+                ...params,
+                variantCount: 1,
+                generationBatchId: jobId,
+                saveReferences: variantIndex === 0,
+              },
+              generationProjectId,
+            );
+            if (!Array.isArray(data.files) || data.files.length === 0) {
+              throw new Error("OpenRouter не вернул готовое изображение.");
+            }
+            await onGenerationVariantFinished({
+              jobId,
+              projectId: generationProjectId,
+            });
+            return data;
+          }),
+        );
+        const completed = variants.filter(
+          (variant): variant is PromiseFulfilledResult<Record<string, unknown>> =>
+            variant.status === "fulfilled",
+        );
+        const failedCount = variants.length - completed.length;
+
+        if (completed.length === 0) {
+          const firstFailure = variants.find(
+            (variant): variant is PromiseRejectedResult =>
+              variant.status === "rejected",
+          );
+          throw firstFailure?.reason instanceof Error
+            ? firstFailure.reason
+            : new Error("Не удалось сгенерировать изображения.");
+        }
+
+        onGenerationFinished({
+          jobId,
+          threadId: String(completed[0].value.threadId || threadId),
+          projectId: generationProjectId,
+          failedCount,
+        });
+        return;
+      }
+
+      const submitted = await generateMedia(params, generationProjectId);
+      const data = await pollVideo(
+        params,
+        submitted,
+        jobId,
+        generationProjectId,
+      );
+
+      if (!Array.isArray(data.files) || data.files.length === 0) {
+        throw new Error("OpenRouter не вернул готовый файл.");
+      }
+
+      onGenerationFinished({
+        jobId,
+        threadId: String(data.threadId || threadId),
+        projectId: generationProjectId,
+      });
+    } catch (error) {
+      onGenerationFailed({
+        jobId,
+        error: error instanceof Error ? error.message : "Ошибка запроса",
+      });
+    }
+  }
+
+  function handleGenerate() {
     if (!fullPrompt) return;
 
     const references = [...uploadedFiles, ...Array.from(selectedImages)];
@@ -182,20 +292,20 @@ export function GenerateImage({
       return;
     }
 
-    setIsGenerating(true);
-    setStatus({
-      type: "info",
-      message: mediaType === "video" ? "Отправка задания на генерацию видео…" : "Генерация изображения…",
-    });
+    const threadId = currentThreadId || `thread_${crypto.randomUUID()}`;
+    const jobId = `generation_${crypto.randomUUID()}`;
+    const submittedAt = new Date().toISOString();
 
     const params: GenerateParams = {
       mediaType,
       prompt: fullPrompt,
+      submittedAt,
       model,
       resolution,
       aspectRatio,
+      variantCount: mediaType === "image" ? variantCount : undefined,
       references,
-      threadId: currentThreadId,
+      threadId,
       duration: mediaType === "video" ? duration : undefined,
       generateAudio: mediaType === "video" ? generateAudio : undefined,
       seed: mediaType === "video" && seed.trim() ? Number(seed) : null,
@@ -205,26 +315,36 @@ export function GenerateImage({
       action: "submit",
     };
 
-    try {
-      const submitted = await generateMedia(params);
-      const data = mediaType === "video" ? await pollVideo(params, submitted) : submitted;
-
-      if (!Array.isArray(data.files) || data.files.length === 0) {
-        throw new Error("OpenRouter не вернул готовый файл.");
-      }
-
-      const costText = data.cost != null ? ` | $${Number(data.cost).toFixed(4)}` : "";
-      setStatus({ type: "success", message: `Готово!${costText}` });
-      onGenerated({ threadId: String(data.threadId) });
-      clearUploads();
-    } catch (error) {
-      setStatus({
-        type: "error",
-        message: error instanceof Error ? error.message : "Ошибка запроса",
-      });
-    } finally {
-      setIsGenerating(false);
-    }
+    onGenerationStarted({
+      jobId,
+      threadId,
+      projectId,
+      entry: {
+        id: jobId,
+        timestamp: submittedAt,
+        prompt: fullPrompt,
+        resolution,
+        aspectRatio,
+        images: [],
+        videos: [],
+        mediaType,
+        model,
+        duration: mediaType === "video" ? duration : undefined,
+        generateAudio: mediaType === "video" ? generateAudio : undefined,
+        seed: mediaType === "video" && seed.trim() ? Number(seed) : null,
+        negativePrompt: mediaType === "video" ? negativePrompt.trim() : undefined,
+        status: "pending",
+        placeholderCount: mediaType === "image" ? variantCount : 1,
+        progress:
+          mediaType === "video"
+            ? "Отправка задания на генерацию видео…"
+            : `Параллельная генерация: ${formatVariantCount(variantCount)}…`,
+        cost: null,
+      },
+    });
+    setStatus({ type: "success", message: "Запрос добавлен в чат и выполняется в фоне." });
+    clearUploads();
+    void runGeneration(params, jobId, threadId, projectId);
   }
 
   return (
@@ -232,7 +352,6 @@ export function GenerateImage({
       <div className="inline-flex rounded-lg bg-zinc-100 dark:bg-zinc-800 p-1 mb-5">
         <button
           onClick={() => handleMediaTypeChange("image")}
-          disabled={isGenerating}
           className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors ${
             mediaType === "image" ? "bg-white dark:bg-zinc-700 shadow-sm text-blue-600" : "text-zinc-500"
           }`}
@@ -242,7 +361,6 @@ export function GenerateImage({
         </button>
         <button
           onClick={() => handleMediaTypeChange("video")}
-          disabled={isGenerating}
           className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition-colors ${
             mediaType === "video" ? "bg-white dark:bg-zinc-700 shadow-sm text-violet-600" : "text-zinc-500"
           }`}
@@ -340,7 +458,7 @@ export function GenerateImage({
         )}
       </div>
 
-      <div className={`grid ${mediaType === "video" ? "grid-cols-4" : "grid-cols-3"} gap-4 mb-4`}>
+      <div className="grid grid-cols-2 gap-4 mb-4 lg:grid-cols-4">
         <div>
           <label className="block mb-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Модель</label>
           <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full p-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
@@ -359,6 +477,16 @@ export function GenerateImage({
             {selectedModel.aspectRatios.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </div>
+        {mediaType === "image" && (
+          <div>
+            <label className="block mb-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Количество вариантов</label>
+            <select value={variantCount} onChange={(e) => setVariantCount(Number(e.target.value))} className="w-full p-2.5 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => (
+                <option key={count} value={count}>{count}</option>
+              ))}
+            </select>
+          </div>
+        )}
         {mediaType === "video" && (
           <div>
             <label className="block mb-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Длительность</label>
@@ -416,13 +544,13 @@ export function GenerateImage({
       </div>
 
       <div className="flex items-center gap-3">
-        <button onClick={handleGenerate} disabled={isGenerating || !fullPrompt} className={`flex items-center gap-2 px-5 py-2.5 ${mediaType === "video" ? "bg-violet-600 hover:bg-violet-700" : "bg-blue-600 hover:bg-blue-700"} disabled:bg-zinc-400 text-white rounded-lg text-sm font-semibold transition-colors`}>
-          {isGenerating ? <Loader2 size={16} className="animate-spin" /> : mediaType === "video" ? <Film size={16} /> : <Sparkles size={16} />}
-          {isGenerating ? "Генерация…" : mediaType === "video" ? "Создать видео" : "Сгенерировать"}
+        <button onClick={handleGenerate} disabled={!fullPrompt} className={`flex items-center gap-2 px-5 py-2.5 ${mediaType === "video" ? "bg-violet-600 hover:bg-violet-700" : "bg-blue-600 hover:bg-blue-700"} disabled:bg-zinc-400 text-white rounded-lg text-sm font-semibold transition-colors`}>
+          {mediaType === "video" ? <Film size={16} /> : <Sparkles size={16} />}
+          {mediaType === "video" ? "Создать видео" : `Сгенерировать (${variantCount})`}
         </button>
 
         {status && (
-          <span className={`text-sm font-medium ${status.type === "success" ? "text-green-600" : status.type === "error" ? "text-red-500" : "text-zinc-500"}`}>
+          <span className={`whitespace-pre-line text-sm font-medium ${status.type === "success" ? "text-green-600" : status.type === "error" ? "text-red-500" : "text-zinc-500"}`}>
             {status.message}
           </span>
         )}
